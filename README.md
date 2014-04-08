@@ -1,6 +1,8 @@
-# Apache Spark
+# Apache Spark fork by Stratio
 
 Lightning-Fast Cluster Computing - <http://spark.apache.org/>
+
+This fork includes changes done by Stratio to support the Stratio bigdata platform.
 
 
 ## Online Documentation
