@@ -19,3 +19,12 @@
 # - SPARK_WORKER_PORT / SPARK_WORKER_WEBUI_PORT
 # - SPARK_WORKER_INSTANCES, to set the number of worker processes per node
 # - SPARK_WORKER_DIR, to set the working directory of worker processes
+
+export SPARK_JAVA_OPTS=" -Djava.net.preferIPv4Stack=true -Dcassandra.config= "
+
+CONFDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for jar in $(ls $CONFDIR/../jars/*.jar); do
+  SPARK_CLASSPATH=$SPARK_CLASSPATH:${jar}
+done
+
+export SPARK_CLASSPATH
