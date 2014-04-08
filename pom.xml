@@ -57,6 +57,17 @@
     <url>https://spark-project.atlassian.net/browse/SPARK</url>
   </issueManagement>
 
+    <distributionManagement>
+        <repository>
+            <id>stratio-releases</id>
+            <url>http://nexus.strat.io:8081/nexus/content/repositories/releases</url>
+        </repository>
+        <snapshotRepository>
+            <id>stratio-snapshots</id>
+            <url>http://nexus.strat.io:8081/nexus/content/repositories/snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
+
   <prerequisites>
     <maven>3.0.0</maven>
   </prerequisites>
