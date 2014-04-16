@@ -40,6 +40,7 @@ fi
 if [ -e "$FWDIR/conf/spark-env.sh" ] ; then
   . $FWDIR/conf/spark-env.sh
 fi
+#TODO stratio-001
 
 # Figure out which Python executable to use
 if [ -z "$PYSPARK_PYTHON" ] ; then

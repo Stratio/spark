@@ -29,11 +29,13 @@ FWDIR="$(cd `dirname $0`/..; pwd)"
 
 # Export this as SPARK_HOME
 export SPARK_HOME="$FWDIR"
+#TODO stratio-002
 
 # Load environment variables from conf/spark-env.sh, if it exists
 if [ -e "$FWDIR/conf/spark-env.sh" ] ; then
   . $FWDIR/conf/spark-env.sh
 fi
+#TODO stratio-001
 
 if [ -z "$1" ]; then
   echo "Usage: run-example <example-class> [<args>]" >&2

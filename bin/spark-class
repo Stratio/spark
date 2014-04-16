@@ -34,6 +34,7 @@ export SPARK_HOME="$FWDIR"
 if [ -e "$FWDIR/conf/spark-env.sh" ] ; then
   . $FWDIR/conf/spark-env.sh
 fi
+#TODO stratio-001
 
 if [ -z "$1" ]; then
   echo "Usage: spark-class <class> [<args>]" >&2
@@ -95,6 +96,7 @@ JAVA_OPTS="$JAVA_OPTS -Xms$SPARK_MEM -Xmx$SPARK_MEM"
 if [ -e "$FWDIR/conf/java-opts" ] ; then
   JAVA_OPTS="$JAVA_OPTS `cat $FWDIR/conf/java-opts`"
 fi
+#TODO stratio-003
 export JAVA_OPTS
 # Attention: when changing the way the JAVA_OPTS are assembled, the change must be reflected in ExecutorRunner.scala!
 

@@ -29,6 +29,7 @@ FWDIR="$(cd `dirname $0`/..; pwd)"
 if [ -e "$FWDIR/conf/spark-env.sh" ] ; then
   . $FWDIR/conf/spark-env.sh
 fi
+#TODO stratio-001
 
 # Build up classpath
 CLASSPATH="$SPARK_CLASSPATH:$FWDIR/conf"
