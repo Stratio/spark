@@ -338,17 +338,6 @@ trait JavaRDDLike[T, This <: JavaRDDLike[T, This]] extends Serializable {
     new java.util.ArrayList(arr)
   }
 
-  /**
-   * Drop the first drop elements and then take next num elements of the RDD. This currently scans the partitions *one by one*, so
-   * it will be slow if a lot of partitions are required. In that case, use collect().drop(drop) to get the
-   * whole RDD instead and drop the required drop elements.
-   */
-  def dropTake(drop: Int, num: Int): JList[T] = {
-    import scala.collection.JavaConversions._
-    val arr: java.util.Collection[T] = rdd.dropTake(drop, num).toSeq
-    new java.util.ArrayList(arr)
-  }
-
   def takeSample(withReplacement: Boolean, num: Int, seed: Int): JList[T] = {
     import scala.collection.JavaConversions._
     val arr: java.util.Collection[T] = rdd.takeSample(withReplacement, num, seed).toSeq
