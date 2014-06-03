@@ -23,11 +23,11 @@ trait SparkILoopInit {
   /** Print a welcome message */
   def printWelcome() {
     echo("""Welcome to
-      ____              __
-     / __/__  ___ _____/ /__
-    _\ \/ _ \/ _ `/ __/  '_/
-   /___/ .__/\_,_/_/ /_/\_\   version 1.0.0
-      /_/
+    ______           __  _        ___
+   / __/ /________ _/ /_(_)__    / _ \___ ___ ___
+  _\ \/ __/ __/ _ `/ __/ / _ \  / // / -_) -_) _ \
+ /___/\__/_/  \_,_/\__/_/\___/ /____/\__/\__/ .__/
+                                           /_/    Powered by Spark v1.0.0
 """)
     import Properties._
     val welcomeMsg = "Using Scala %s (%s, Java %s)".format(
