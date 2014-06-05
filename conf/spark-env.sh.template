@@ -42,7 +42,7 @@
 # - SPARK_DAEMON_JAVA_OPTS, to set config properties for all daemons (e.g. "-Dx=y")
 # - SPARK_PUBLIC_DNS, to set the public dns name of the master or workers
 
-export SPARK_JAVA_OPTS=" -Djava.net.preferIPv4Stack=true -Dcassandra.config= "
+export SPARK_DAEMON_JAVA_OPTS=" -Djava.net.preferIPv4Stack=true -Dcassandra.config= "
 
 CONFDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for jar in $(ls $CONFDIR/../jars/*.jar); do
