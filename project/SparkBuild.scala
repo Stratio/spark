@@ -49,7 +49,7 @@ object SparkBuild extends Build {
   val DEFAULT_HIVE = false
 
   // HBase version; set as appropriate.
-  val HBASE_VERSION = "0.98.3-hadoop2"
+  val HBASE_VERSION = "0.94.6"
 
   // Target JVM version
   val SCALAC_JVM_VERSION = "jvm-1.6"
