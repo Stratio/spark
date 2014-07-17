@@ -32,7 +32,7 @@ import scala.collection.JavaConversions._
 // import com.jsuereth.pgp.sbtplugin.PgpKeys._
 
 object SparkBuild extends Build {
-  val SPARK_VERSION = "1.0.0"
+  val SPARK_VERSION = "1.0.1"
   val SPARK_VERSION_SHORT = SPARK_VERSION.replaceAll("-SNAPSHOT", "")
 
   // Hadoop version to build against. For example, "1.0.4" for Apache releases, or
@@ -59,8 +59,10 @@ object SparkBuild extends Build {
 
   lazy val core = Project("core", file("core"), settings = coreSettings)
 
+  def replDependencies = Seq[ProjectReference](core, graphx, bagel, mllib, sql) ++ maybeHiveRef
+
   lazy val repl = Project("repl", file("repl"), settings = replSettings)
-    .dependsOn(core, graphx, bagel, mllib, sql)
+    .dependsOn(replDependencies.map(a => a: sbt.ClasspathDep[sbt.ProjectReference]): _*)
 
   lazy val tools = Project("tools", file("tools"), settings = toolsSettings) dependsOn(core) dependsOn(streaming)
 
@@ -70,7 +72,7 @@ object SparkBuild extends Build {
 
   lazy val catalyst = Project("catalyst", file("sql/catalyst"), settings = catalystSettings) dependsOn(core)
 
-  lazy val sql = Project("sql", file("sql/core"), settings = sqlCoreSettings) dependsOn(core, catalyst)
+  lazy val sql = Project("sql", file("sql/core"), settings = sqlCoreSettings) dependsOn(core) dependsOn(catalyst % "compile->compile;test->test")
 
   lazy val hive = Project("hive", file("sql/hive"), settings = hiveSettings) dependsOn(sql)
 
@@ -210,6 +212,7 @@ object SparkBuild extends Build {
       "JBoss Repository"     at "https://repository.jboss.org/nexus/content/repositories/releases/",
       "MQTT Repository"      at "https://repo.eclipse.org/content/repositories/paho-releases/",
       "Cloudera Repository"  at "http://repository.cloudera.com/artifactory/cloudera-repos/",
+      "Pivotal Repository"   at "http://repo.spring.io/libs-release/",
       // For Sonatype publishing
       // "sonatype-snapshots"   at "https://oss.sonatype.org/content/repositories/snapshots",
       // "sonatype-staging"     at "https://oss.sonatype.org/service/local/staging/deploy/maven2/",
@@ -267,16 +270,17 @@ object SparkBuild extends Build {
     */
 
     libraryDependencies ++= Seq(
-        "io.netty"          % "netty-all"      % "4.0.17.Final",
-        "org.eclipse.jetty" % "jetty-server"   % jettyVersion,
-        "org.eclipse.jetty" % "jetty-util"     % jettyVersion,
-        "org.eclipse.jetty" % "jetty-plus"     % jettyVersion,
-        "org.eclipse.jetty" % "jetty-security" % jettyVersion,
-        "org.scalatest"    %% "scalatest"       % "1.9.1"  % "test",
-        "org.scalacheck"   %% "scalacheck"      % "1.10.0" % "test",
-        "com.novocode"      % "junit-interface" % "0.10"   % "test",
-        "org.easymock"      % "easymock"        % "3.1"    % "test",
-        "org.mockito"       % "mockito-all"     % "1.8.5"  % "test"
+        "io.netty"          % "netty-all"              % "4.0.17.Final",
+        "org.eclipse.jetty" % "jetty-server"           % jettyVersion,
+        "org.eclipse.jetty" % "jetty-util"             % jettyVersion,
+        "org.eclipse.jetty" % "jetty-plus"             % jettyVersion,
+        "org.eclipse.jetty" % "jetty-security"         % jettyVersion,
+        "org.scalatest"    %% "scalatest"              % "2.1.5"  % "test",
+        "org.scalacheck"   %% "scalacheck"             % "1.11.3" % "test",
+        "com.novocode"      % "junit-interface"        % "0.10"   % "test",
+        "org.easymock"      % "easymockclassextension" % "3.1"    % "test",
+        "org.mockito"       % "mockito-all"            % "1.9.0"  % "test",
+        "junit"             % "junit"                  % "4.10"   % "test"
     ),
 
     testOptions += Tests.Argument(TestFrameworks.JUnit, "-v", "-a"),
@@ -348,6 +352,7 @@ object SparkBuild extends Build {
         "org.apache.mesos"           % "mesos"            % "0.18.1" classifier("shaded-protobuf") exclude("com.google.protobuf", "protobuf-java"),
         "commons-net"                % "commons-net"      % "2.2",
         "net.java.dev.jets3t"        % "jets3t"           % jets3tVersion excludeAll(excludeCommonsLogging),
+        "commons-codec"              % "commons-codec"    % "1.5", // Prevent jets3t from including the older version of commons-codec
         "org.apache.derby"           % "derby"            % "10.4.2.0"                     % "test",
         "org.apache.hadoop"          % hadoopClient       % hadoopVersion excludeAll(excludeJBossNetty, excludeAsm, excludeCommonsLogging, excludeSLF4J, excludeOldAsm),
         "org.apache.curator"         % "curator-recipes"  % "2.4.0" excludeAll(excludeJBossNetty),
@@ -472,7 +477,6 @@ object SparkBuild extends Build {
     // this non-deterministically.  TODO: FIX THIS.
     parallelExecution in Test := false,
     libraryDependencies ++= Seq(
-      "org.scalatest" %% "scalatest" % "1.9.1" % "test",
       "com.typesafe" %% "scalalogging-slf4j" % "1.0.1"
     )
   )
@@ -480,9 +484,23 @@ object SparkBuild extends Build {
   def sqlCoreSettings = sharedSettings ++ Seq(
     name := "spark-sql",
     libraryDependencies ++= Seq(
-      "com.twitter" % "parquet-column" % parquetVersion,
-      "com.twitter" % "parquet-hadoop" % parquetVersion
-    )
+      "com.twitter"                  % "parquet-column"             % parquetVersion,
+      "com.twitter"                  % "parquet-hadoop"             % parquetVersion,
+      "com.fasterxml.jackson.core"   % "jackson-databind"           % "2.3.0" // json4s-jackson 3.2.6 requires jackson-databind 2.3.0.
+    ),
+    initialCommands in console :=
+      """
+        |import org.apache.spark.sql.catalyst.analysis._
+        |import org.apache.spark.sql.catalyst.dsl._
+        |import org.apache.spark.sql.catalyst.errors._
+        |import org.apache.spark.sql.catalyst.expressions._
+        |import org.apache.spark.sql.catalyst.plans.logical._
+        |import org.apache.spark.sql.catalyst.rules._
+        |import org.apache.spark.sql.catalyst.types._
+        |import org.apache.spark.sql.catalyst.util._
+        |import org.apache.spark.sql.execution
+        |import org.apache.spark.sql.test.TestSQLContext._
+        |import org.apache.spark.sql.parquet.ParquetTestData""".stripMargin
   )
 
   // Since we don't include hive in the main assembly this project also acts as an alternative

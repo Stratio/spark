@@ -578,8 +578,9 @@ class DAGScheduler(
       }
     } catch {
       case e: Exception =>
-        jobResult = JobFailed(e)
-        job.listener.jobFailed(e)
+        val exception = new SparkDriverExecutionException(e)
+        jobResult = JobFailed(exception)
+        job.listener.jobFailed(exception)
     } finally {
       val s = job.finalStage
       stageIdToJobIds -= s.id    // clean up data structures that were populated for a local job,
@@ -815,6 +816,7 @@ class DAGScheduler(
       case Success =>
         logInfo("Completed " + task)
         if (event.accumUpdates != null) {
+          // TODO: fail the stage if the accumulator update fails...
           Accumulators.add(event.accumUpdates) // TODO: do this only if task wasn't resubmitted
         }
         pendingTasks(stage) -= task
@@ -831,7 +833,16 @@ class DAGScheduler(
                     cleanupStateForJobAndIndependentStages(job, Some(stage))
                     listenerBus.post(SparkListenerJobEnd(job.jobId, JobSucceeded))
                   }
-                  job.listener.taskSucceeded(rt.outputId, event.result)
+
+                  // taskSucceeded runs some user code that might throw an exception. Make sure
+                  // we are resilient against that.
+                  try {
+                    job.listener.taskSucceeded(rt.outputId, event.result)
+                  } catch {
+                    case e: Exception =>
+                      // TODO: Perhaps we want to mark the stage as failed?
+                      job.listener.jobFailed(new SparkDriverExecutionException(e))
+                  }
                 }
               case None =>
                 logInfo("Ignoring result from " + rt + " because its job has finished")
@@ -1031,7 +1042,7 @@ class DAGScheduler(
   private def failJobAndIndependentStages(job: ActiveJob, failureReason: String,
       resultStage: Option[Stage]) {
     val error = new SparkException(failureReason)
-    job.listener.jobFailed(error)
+    var ableToCancelStages = true
 
     val shouldInterruptThread =
       if (job.properties == null) false
@@ -1055,18 +1066,26 @@ class DAGScheduler(
           // This is the only job that uses this stage, so fail the stage if it is running.
           val stage = stageIdToStage(stageId)
           if (runningStages.contains(stage)) {
-            taskScheduler.cancelTasks(stageId, shouldInterruptThread)
-            val stageInfo = stageToInfos(stage)
-            stageInfo.stageFailed(failureReason)
-            listenerBus.post(SparkListenerStageCompleted(stageToInfos(stage)))
+            try { // cancelTasks will fail if a SchedulerBackend does not implement killTask
+              taskScheduler.cancelTasks(stageId, shouldInterruptThread)
+              val stageInfo = stageToInfos(stage)
+              stageInfo.stageFailed(failureReason)
+              listenerBus.post(SparkListenerStageCompleted(stageToInfos(stage)))
+            } catch {
+              case e: UnsupportedOperationException =>
+                logInfo(s"Could not cancel tasks for stage $stageId", e)
+              ableToCancelStages = false
+            }
           }
         }
       }
     }
 
-    cleanupStateForJobAndIndependentStages(job, resultStage)
-
-    listenerBus.post(SparkListenerJobEnd(job.jobId, JobFailed(error)))
+    if (ableToCancelStages) {
+      job.listener.jobFailed(error)
+      cleanupStateForJobAndIndependentStages(job, resultStage)
+      listenerBus.post(SparkListenerJobEnd(job.jobId, JobFailed(error)))
+    }
   }
 
   /**
@@ -1146,9 +1165,12 @@ private[scheduler] class DAGSchedulerActorSupervisor(dagScheduler: DAGScheduler)
   override val supervisorStrategy =
     OneForOneStrategy() {
       case x: Exception =>
-        logError("eventProcesserActor failed due to the error %s; shutting down SparkContext"
-          .format(x.getMessage))
-        dagScheduler.doCancelAllJobs()
+        logError("eventProcesserActor failed; shutting down SparkContext", x)
+        try {
+          dagScheduler.doCancelAllJobs()
+        } catch {
+          case t: Throwable => logError("DAGScheduler failed to cancel all jobs.", t)
+        }
         dagScheduler.sc.stop()
         Stop
     }

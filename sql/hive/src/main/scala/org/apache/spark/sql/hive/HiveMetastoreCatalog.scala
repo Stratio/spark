@@ -36,7 +36,7 @@ import org.apache.spark.sql.catalyst.rules._
 import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.execution.SparkLogicalPlan
 import org.apache.spark.sql.hive.execution.{HiveTableScan, InsertIntoHiveTable}
-import org.apache.spark.sql.columnar.InMemoryColumnarTableScan
+import org.apache.spark.sql.columnar.{InMemoryRelation, InMemoryColumnarTableScan}
 
 /* Implicit conversions */
 import scala.collection.JavaConversions._
@@ -105,7 +105,7 @@ private[hive] class HiveMetastoreCatalog(hive: HiveContext) extends Catalog with
   object CreateTables extends Rule[LogicalPlan] {
     def apply(plan: LogicalPlan): LogicalPlan = plan transform {
       case InsertIntoCreatedTable(db, tableName, child) =>
-        val databaseName = db.getOrElse(SessionState.get.getCurrentDatabase)
+        val databaseName = db.getOrElse(hive.sessionState.getCurrentDatabase)
 
         createTable(databaseName, tableName, child.output)
 
@@ -130,8 +130,9 @@ private[hive] class HiveMetastoreCatalog(hive: HiveContext) extends Catalog with
       case p @ InsertIntoTable(table: MetastoreRelation, _, child, _) =>
         castChildOutput(p, table, child)
 
-      case p @ logical.InsertIntoTable(SparkLogicalPlan(InMemoryColumnarTableScan(
-        _, HiveTableScan(_, table, _), _)), _, child, _) =>
+      case p @ logical.InsertIntoTable(
+                 InMemoryRelation(_, _,
+                   HiveTableScan(_, table, _)), _, child, _) =>
         castChildOutput(p, table, child)
     }
 
@@ -190,6 +191,7 @@ object HiveMetastoreTypes extends RegexParsers {
     "binary" ^^^ BinaryType |
     "boolean" ^^^ BooleanType |
     "decimal" ^^^ DecimalType |
+    "timestamp" ^^^ TimestampType |
     "varchar\\((\\d+)\\)".r ^^^ StringType
 
   protected lazy val arrayType: Parser[DataType] =
@@ -201,12 +203,14 @@ object HiveMetastoreTypes extends RegexParsers {
     }
 
   protected lazy val structField: Parser[StructField] =
-    "[a-zA-Z0-9]*".r ~ ":" ~ dataType ^^ {
+    "[a-zA-Z0-9_]*".r ~ ":" ~ dataType ^^ {
       case name ~ _ ~ tpe => StructField(name, tpe, nullable = true)
     }
 
   protected lazy val structType: Parser[DataType] =
-    "struct" ~> "<" ~> repsep(structField,",") <~ ">" ^^ StructType
+    "struct" ~> "<" ~> repsep(structField,",") <~ ">"  ^^ {
+      case fields => new StructType(fields)
+    }
 
   protected lazy val dataType: Parser[DataType] =
     arrayType |
@@ -235,6 +239,7 @@ object HiveMetastoreTypes extends RegexParsers {
     case BinaryType => "binary"
     case BooleanType => "boolean"
     case DecimalType => "decimal"
+    case TimestampType => "timestamp"
   }
 }
 

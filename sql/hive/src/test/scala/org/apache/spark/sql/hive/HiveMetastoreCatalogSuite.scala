@@ -15,27 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.hive.api.java
+package org.apache.spark.sql.hive
 
 import org.scalatest.FunSuite
 
-import org.apache.spark.api.java.JavaSparkContext
-import org.apache.spark.sql.test.TestSQLContext
-import org.apache.spark.sql.hive.test.TestHive
+import org.apache.spark.sql.catalyst.types.{DataType, StructType}
 
-// Implicits
-import scala.collection.JavaConversions._
+class HiveMetastoreCatalogSuite extends FunSuite {
 
-class JavaHiveSQLSuite extends FunSuite {
-  ignore("SELECT * FROM src") {
-    val javaCtx = new JavaSparkContext(TestSQLContext.sparkContext)
-    // There is a little trickery here to avoid instantiating two HiveContexts in the same JVM
-    val javaSqlCtx = new JavaHiveContext(javaCtx) {
-      override val sqlContext = TestHive
-    }
+  test("struct field should accept underscore in sub-column name") {
+    val metastr = "struct<a: int, b_1: string, c: string>"
 
-    assert(
-      javaSqlCtx.hql("SELECT * FROM src").collect().map(_.getInt(0)) ===
-        TestHive.sql("SELECT * FROM src").collect().map(_.getInt(0)).toSeq)
+    val datatype = HiveMetastoreTypes.toDataType(metastr)
+    assert(datatype.isInstanceOf[StructType])
   }
 }

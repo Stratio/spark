@@ -22,18 +22,20 @@ import java.nio.ByteBuffer
 import akka.actor._
 import akka.remote._
 
-import org.apache.spark.{Logging, SecurityManager, SparkConf}
+import org.apache.spark.{SparkEnv, Logging, SecurityManager, SparkConf}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.deploy.worker.WorkerWatcher
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
+import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.util.{AkkaUtils, Utils}
 
 private[spark] class CoarseGrainedExecutorBackend(
     driverUrl: String,
     executorId: String,
     hostPort: String,
-    cores: Int)
+    cores: Int,
+    actorSystem: ActorSystem)
   extends Actor
   with ExecutorBackend
   with Logging {
@@ -61,12 +63,14 @@ private[spark] class CoarseGrainedExecutorBackend(
       logError("Slave registration failed: " + message)
       System.exit(1)
 
-    case LaunchTask(taskDesc) =>
-      logInfo("Got assigned task " + taskDesc.taskId)
+    case LaunchTask(data) =>
       if (executor == null) {
         logError("Received LaunchTask command but executor was null")
         System.exit(1)
       } else {
+        val ser = SparkEnv.get.closureSerializer.newInstance()
+        val taskDesc = ser.deserialize[TaskDescription](data.value)
+        logInfo("Got assigned task " + taskDesc.taskId)
         executor.launchTask(this, taskDesc.taskId, taskDesc.serializedTask)
       }
 
@@ -91,6 +95,9 @@ private[spark] class CoarseGrainedExecutorBackend(
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
   }
+
+  override def akkaFrameSize() = actorSystem.settings.config.getBytes(
+    "akka.remote.netty.tcp.maximum-frame-size")
 }
 
 private[spark] object CoarseGrainedExecutorBackend {
@@ -110,7 +117,7 @@ private[spark] object CoarseGrainedExecutorBackend {
         val sparkHostPort = hostname + ":" + boundPort
         actorSystem.actorOf(
           Props(classOf[CoarseGrainedExecutorBackend], driverUrl, executorId,
-            sparkHostPort, cores),
+            sparkHostPort, cores, actorSystem),
           name = "Executor")
         workerUrl.foreach {
           url =>

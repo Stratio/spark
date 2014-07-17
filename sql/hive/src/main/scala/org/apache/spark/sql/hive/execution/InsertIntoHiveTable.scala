@@ -17,151 +17,29 @@
 
 package org.apache.spark.sql.hive.execution
 
+import scala.collection.JavaConversions._
+
+import java.util.{HashMap => JHashMap}
+
 import org.apache.hadoop.hive.common.`type`.{HiveDecimal, HiveVarchar}
 import org.apache.hadoop.hive.metastore.MetaStoreUtils
 import org.apache.hadoop.hive.ql.Context
-import org.apache.hadoop.hive.ql.metadata.{Partition => HivePartition, Hive}
-import org.apache.hadoop.hive.ql.plan.{TableDesc, FileSinkDesc}
+import org.apache.hadoop.hive.ql.metadata.Hive
+import org.apache.hadoop.hive.ql.plan.{FileSinkDesc, TableDesc}
 import org.apache.hadoop.hive.serde2.Serializer
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.ObjectInspectorCopyOption
 import org.apache.hadoop.hive.serde2.objectinspector._
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.ObjectInspectorCopyOption
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.JavaHiveDecimalObjectInspector
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.JavaHiveVarcharObjectInspector
 import org.apache.hadoop.io.Writable
-import org.apache.hadoop.mapred._
+import org.apache.hadoop.mapred.{FileOutputCommitter, FileOutputFormat, JobConf}
 
+import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.types.{BooleanType, DataType}
-import org.apache.spark.sql.execution._
-import org.apache.spark.sql.hive._
-import org.apache.spark.{TaskContext, SparkException}
-
-/* Implicits */
-import scala.collection.JavaConversions._
-
-/**
- * :: DeveloperApi ::
- * The Hive table scan operator.  Column and partition pruning are both handled.
- *
- * @param attributes Attributes to be fetched from the Hive table.
- * @param relation The Hive table be be scanned.
- * @param partitionPruningPred An optional partition pruning predicate for partitioned table.
- */
-@DeveloperApi
-case class HiveTableScan(
-    attributes: Seq[Attribute],
-    relation: MetastoreRelation,
-    partitionPruningPred: Option[Expression])(
-    @transient val sc: HiveContext)
-  extends LeafNode
-  with HiveInspectors {
-
-  require(partitionPruningPred.isEmpty || relation.hiveQlTable.isPartitioned,
-    "Partition pruning predicates only supported for partitioned tables.")
-
-  // Bind all partition key attribute references in the partition pruning predicate for later
-  // evaluation.
-  private val boundPruningPred = partitionPruningPred.map { pred =>
-    require(
-      pred.dataType == BooleanType,
-      s"Data type of predicate $pred must be BooleanType rather than ${pred.dataType}.")
-
-    BindReferences.bindReference(pred, relation.partitionKeys)
-  }
-
-  @transient
-  val hadoopReader = new HadoopTableReader(relation.tableDesc, sc)
-
-  /**
-   * The hive object inspector for this table, which can be used to extract values from the
-   * serialized row representation.
-   */
-  @transient
-  lazy val objectInspector =
-    relation.tableDesc.getDeserializer.getObjectInspector.asInstanceOf[StructObjectInspector]
-
-  /**
-   * Functions that extract the requested attributes from the hive output.  Partitioned values are
-   * casted from string to its declared data type.
-   */
-  @transient
-  protected lazy val attributeFunctions: Seq[(Any, Array[String]) => Any] = {
-    attributes.map { a =>
-      val ordinal = relation.partitionKeys.indexOf(a)
-      if (ordinal >= 0) {
-        (_: Any, partitionKeys: Array[String]) => {
-          val value = partitionKeys(ordinal)
-          val dataType = relation.partitionKeys(ordinal).dataType
-          castFromString(value, dataType)
-        }
-      } else {
-        val ref = objectInspector.getAllStructFieldRefs
-          .find(_.getFieldName == a.name)
-          .getOrElse(sys.error(s"Can't find attribute $a"))
-        (row: Any, _: Array[String]) => {
-          val data = objectInspector.getStructFieldData(row, ref)
-          unwrapData(data, ref.getFieldObjectInspector)
-        }
-      }
-    }
-  }
-
-  private def castFromString(value: String, dataType: DataType) = {
-    Cast(Literal(value), dataType).eval(null)
-  }
-
-  @transient
-  def inputRdd = if (!relation.hiveQlTable.isPartitioned) {
-    hadoopReader.makeRDDForTable(relation.hiveQlTable)
-  } else {
-    hadoopReader.makeRDDForPartitionedTable(prunePartitions(relation.hiveQlPartitions))
-  }
-
-  /**
-   * Prunes partitions not involve the query plan.
-   *
-   * @param partitions All partitions of the relation.
-   * @return Partitions that are involved in the query plan.
-   */
-  private[hive] def prunePartitions(partitions: Seq[HivePartition]) = {
-    boundPruningPred match {
-      case None => partitions
-      case Some(shouldKeep) => partitions.filter { part =>
-        val dataTypes = relation.partitionKeys.map(_.dataType)
-        val castedValues = for ((value, dataType) <- part.getValues.zip(dataTypes)) yield {
-          castFromString(value, dataType)
-        }
-
-        // Only partitioned values are needed here, since the predicate has already been bound to
-        // partition key attribute references.
-        val row = new GenericRow(castedValues.toArray)
-        shouldKeep.eval(row).asInstanceOf[Boolean]
-      }
-    }
-  }
-
-  def execute() = {
-    inputRdd.map { row =>
-      val values = row match {
-        case Array(deserializedRow: AnyRef, partitionKeys: Array[String]) =>
-          attributeFunctions.map(_(deserializedRow, partitionKeys))
-        case deserializedRow: AnyRef =>
-          attributeFunctions.map(_(deserializedRow, Array.empty))
-      }
-      buildRow(values.map {
-        case n: String if n.toLowerCase == "null" => null
-        case varchar: org.apache.hadoop.hive.common.`type`.HiveVarchar => varchar.getValue
-        case decimal: org.apache.hadoop.hive.common.`type`.HiveDecimal =>
-          BigDecimal(decimal.bigDecimalValue)
-        case other => other
-      })
-    }
-  }
-
-  def output = attributes
-}
+import org.apache.spark.sql.catalyst.expressions.Row
+import org.apache.spark.sql.execution.{SparkPlan, UnaryNode}
+import org.apache.spark.sql.hive.{HiveContext, MetastoreRelation, SparkHiveHadoopWriter}
 
 /**
  * :: DeveloperApi ::
@@ -211,6 +89,12 @@ case class InsertIntoHiveTable(
     case (s: Seq[_], oi: ListObjectInspector) =>
       val wrappedSeq = s.map(wrap(_, oi.getListElementObjectInspector))
       seqAsJavaList(wrappedSeq)
+
+    case (m: Map[_, _], oi: MapObjectInspector) =>
+      val keyOi = oi.getMapKeyObjectInspector
+      val valueOi = oi.getMapValueObjectInspector
+      val wrappedMap = m.map { case (key, value) => wrap(key, keyOi) -> wrap(value, valueOi) }
+      mapAsJavaMap(wrappedMap)
 
     case (obj, _) =>
       obj
@@ -275,12 +159,16 @@ case class InsertIntoHiveTable(
     writer.commitJob()
   }
 
+  override def execute() = result
+
   /**
    * Inserts all the rows in the table into Hive.  Row objects are properly serialized with the
    * `org.apache.hadoop.hive.serde2.SerDe` and the
    * `org.apache.hadoop.mapred.OutputFormat` provided by the table definition.
+   *
+   * Note: this is run once and then kept to avoid double insertions.
    */
-  def execute() = {
+  private lazy val result: RDD[Row] = {
     val childRdd = child.execute()
     assert(childRdd != null)
 
@@ -298,12 +186,18 @@ case class InsertIntoHiveTable(
           ObjectInspectorCopyOption.JAVA)
         .asInstanceOf[StructObjectInspector]
 
-      iter.map { row =>
-        // Casts Strings to HiveVarchars when necessary.
-        val fieldOIs = standardOI.getAllStructFieldRefs.map(_.getFieldObjectInspector)
-        val mappedRow = row.zip(fieldOIs).map(wrap)
 
-        serializer.serialize(mappedRow.toArray, standardOI)
+      val fieldOIs = standardOI.getAllStructFieldRefs.map(_.getFieldObjectInspector).toArray
+      val outputData = new Array[Any](fieldOIs.length)
+      iter.map { row =>
+        var i = 0
+        while (i < row.length) {
+          // Casts Strings to HiveVarchars when necessary.
+          outputData(i) = wrap(row(i), fieldOIs(i))
+          i += 1
+        }
+
+        serializer.serialize(outputData, standardOI)
       }
     }
 

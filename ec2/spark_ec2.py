@@ -70,7 +70,7 @@ def parse_args():
            "slaves across multiple (an additional $0.01/Gb for bandwidth" +
            "between zones applies)")
   parser.add_option("-a", "--ami", help="Amazon Machine Image ID to use")
-  parser.add_option("-v", "--spark-version", default="1.0.0",
+  parser.add_option("-v", "--spark-version", default="1.0.1",
       help="Version of Spark to use: 'X.Y.Z' or a specific git hash")
   parser.add_option("--spark-git-repo",
       default="https://github.com/apache/spark",
@@ -164,7 +164,7 @@ def is_active(instance):
 # Return correct versions of Spark and Shark, given the supplied Spark version
 def get_spark_shark_version(opts):
   spark_shark_map = {"0.7.3": "0.7.1", "0.8.0": "0.8.0", "0.8.1": "0.8.1", "0.9.0": "0.9.0", 
-    "0.9.1": "0.9.1", "1.0.0": "1.0.0"}
+    "0.9.1": "0.9.1", "1.0.0": "1.0.0", "1.0.1": "1.0.0"}
   version = opts.spark_version.replace("v", "")
   if version not in spark_shark_map:
     print >> stderr, "Don't know about Spark version: %s" % version
@@ -173,6 +173,8 @@ def get_spark_shark_version(opts):
 
 # Attempt to resolve an appropriate AMI given the architecture and
 # region of the request.
+# Information regarding Amazon Linux AMI instance type was updated on 2014-6-20:
+# http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
 def get_spark_ami(opts):
   instance_types = {
     "m1.small":    "pvm",
@@ -190,6 +192,8 @@ def get_spark_ami(opts):
     "cg1.4xlarge": "hvm",
     "hs1.8xlarge": "hvm",
     "hi1.4xlarge": "hvm",
+    "m3.medium":   "hvm",
+    "m3.large":    "hvm",
     "m3.xlarge":   "hvm",
     "m3.2xlarge":  "hvm",
     "cr1.8xlarge": "hvm",
@@ -201,7 +205,12 @@ def get_spark_ami(opts):
     "c3.xlarge":   "pvm",
     "c3.2xlarge":  "pvm",
     "c3.4xlarge":  "pvm",
-    "c3.8xlarge":  "pvm"
+    "c3.8xlarge":  "pvm",
+    "r3.large":    "hvm",
+    "r3.xlarge":   "hvm",
+    "r3.2xlarge":  "hvm",
+    "r3.4xlarge":  "hvm",
+    "r3.8xlarge":  "hvm"
   }
   if opts.instance_type in instance_types:
     instance_type = instance_types[opts.instance_type]
@@ -479,7 +488,8 @@ def wait_for_cluster(conn, wait_secs, master_nodes, slave_nodes):
 
 # Get number of local disks available for a given EC2 instance type.
 def get_num_disks(instance_type):
-  # From http://docs.amazonwebservices.com/AWSEC2/latest/UserGuide/index.html?InstanceStorage.html
+  # From http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html
+  # Updated 2014-6-20
   disks_by_instance = {
     "m1.small":    1,
     "m1.medium":   1,
@@ -497,8 +507,10 @@ def get_num_disks(instance_type):
     "hs1.8xlarge": 24,
     "cr1.8xlarge": 2,
     "hi1.4xlarge": 2,
-    "m3.xlarge":   0,
-    "m3.2xlarge":  0,
+    "m3.medium":   1,
+    "m3.large":    1,
+    "m3.xlarge":   2,
+    "m3.2xlarge":  2,
     "i2.xlarge":   1,
     "i2.2xlarge":  2,
     "i2.4xlarge":  4,
@@ -507,7 +519,14 @@ def get_num_disks(instance_type):
     "c3.xlarge":   2,
     "c3.2xlarge":  2,
     "c3.4xlarge":  2,
-    "c3.8xlarge":  2
+    "c3.8xlarge":  2,
+    "r3.large":    1,
+    "r3.xlarge":   1,
+    "r3.2xlarge":  1,
+    "r3.4xlarge":  1,
+    "r3.8xlarge":  2,
+    "g2.2xlarge":  1,
+    "t1.micro":    0
   }
   if instance_type in disks_by_instance:
     return disks_by_instance[instance_type]
@@ -632,9 +651,23 @@ def ssh(host, opts, command):
       time.sleep(30)
       tries = tries + 1
 
+# Backported from Python 2.7 for compatiblity with 2.6 (See SPARK-1990)
+def _check_output(*popenargs, **kwargs):
+    if 'stdout' in kwargs:
+        raise ValueError('stdout argument not allowed, it will be overridden.')
+    process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
+    output, unused_err = process.communicate()
+    retcode = process.poll()
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = popenargs[0]
+        raise subprocess.CalledProcessError(retcode, cmd, output=output)
+    return output
+
 
 def ssh_read(host, opts, command):
-  return subprocess.check_output(
+  return _check_output(
       ssh_command(opts) + ['%s@%s' % (opts.user, host), stringify_command(command)])
 
 

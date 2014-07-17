@@ -24,7 +24,7 @@ import org.scalatest.FunSuite
 
 import org.apache.spark._
 import org.apache.spark.SparkContext._
-import org.apache.spark.rdd._
+import org.apache.spark.util.Utils
 
 class RDDSuite extends FunSuite with SharedSparkContext {
 
@@ -64,6 +64,13 @@ class RDDSuite extends FunSuite with SharedSparkContext {
     intercept[UnsupportedOperationException] {
       nums.filter(_ > 5).reduce(_ + _)
     }
+  }
+
+  test("serialization") {
+    val empty = new EmptyRDD[Int](sc)
+    val serial = Utils.serialize(empty)
+    val deserial: EmptyRDD[Int] = Utils.deserialize(serial)
+    assert(!deserial.toString().isEmpty())
   }
 
   test("countApproxDistinct") {
@@ -268,8 +275,9 @@ class RDDSuite extends FunSuite with SharedSparkContext {
 
     // we can optionally shuffle to keep the upstream parallel
     val coalesced5 = data.coalesce(1, shuffle = true)
-    assert(coalesced5.dependencies.head.rdd.dependencies.head.rdd.asInstanceOf[ShuffledRDD[_, _, _]] !=
-      null)
+    val isEquals = coalesced5.dependencies.head.rdd.dependencies.head.rdd.
+      asInstanceOf[ShuffledRDD[_, _, _]] != null
+    assert(isEquals)
 
     // when shuffling, we can increase the number of partitions
     val coalesced6 = data.coalesce(20, shuffle = true)
