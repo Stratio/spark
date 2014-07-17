@@ -27,7 +27,7 @@ trait SparkILoopInit {
    / __/ /________ _/ /_(_)__    / _ \___ ___ ___
   _\ \/ __/ __/ _ `/ __/ / _ \  / // / -_) -_) _ \
  /___/\__/_/  \_,_/\__/_/\___/ /____/\__/\__/ .__/
-                                           /_/    Powered by Spark v1.0.0
+                                           /_/    Powered by Spark v1.0.1
 """)
     import Properties._
     val welcomeMsg = "Using Scala %s (%s, Java %s)".format(
