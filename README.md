@@ -1,4 +1,4 @@
-# Apache Spark
+# Apache Spark fork by Stratio
 
 Spark is a fast and general cluster computing system for Big Data. It provides
 high-level APIs in Scala, Java, and Python, and an optimized engine that
@@ -9,6 +9,7 @@ and Spark Streaming.
 
 <http://spark.apache.org/>
 
+This fork includes changes done by Stratio to support the Stratio bigdata platform.
 
 ## Online Documentation
 
