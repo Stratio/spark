@@ -1,0 +1,4 @@
+#!/bin/bash
+#TODO stratio-004
+export SPARK_HOME="$(cd `dirname $0`/..; pwd)"
+$SPARK_HOME/bin/spark-shell -i $SPARK_HOME/bin/stratio-deep-init.scala
