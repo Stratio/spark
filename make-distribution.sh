@@ -124,18 +124,7 @@ SPARK_HIVE=$(mvn help:evaluate -Dexpression=project.activeProfiles $@ 2>/dev/nul
     # Reset exit status to 0, otherwise the script stops here if the last grep finds nothing\
     # because we use "set -o pipefail"
     echo -n)
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
-echo $SPARK_HADOOP_VERSION
+
 JAVA_CMD="$JAVA_HOME"/bin/java
 JAVA_VERSION=$("$JAVA_CMD" -version 2>&1)
 if [[ ! "$JAVA_VERSION" =~ "1.6" && -z "$SKIP_JAVA_TEST" ]]; then
