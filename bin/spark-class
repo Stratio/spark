@@ -33,6 +33,7 @@ FWDIR="$(cd `dirname $0`/..; pwd)"
 export SPARK_HOME="$FWDIR"
 
 . $FWDIR/bin/load-spark-env.sh
+#TODO stratio-001
 
 if [ -z "$1" ]; then
   echo "Usage: spark-class <class> [<args>]" 1>&2
