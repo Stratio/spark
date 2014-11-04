@@ -31,6 +31,7 @@ script=`basename "$this"`
 config_bin=`cd "$config_bin"; pwd`
 this="$config_bin/$script"
 
+#TODO stratio-005
 export SPARK_PREFIX=`dirname "$this"`/..
 export SPARK_HOME=${SPARK_PREFIX}
 export SPARK_CONF_DIR="$SPARK_HOME/conf"
