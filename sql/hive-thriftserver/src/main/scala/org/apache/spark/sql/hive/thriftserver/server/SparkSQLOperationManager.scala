@@ -39,7 +39,9 @@ import org.apache.spark.sql.hive.thriftserver.ReflectionUtils
 /**
  * Executes queries using Spark SQL, and maintains a list of handles to active queries.
  */
-class SparkSQLOperationManager(hiveContext: HiveContext) extends OperationManager with Logging {
+private[thriftserver] class SparkSQLOperationManager(hiveContext: HiveContext)
+  extends OperationManager with Logging {
+
   val handleToOperation = ReflectionUtils
     .getSuperField[JMap[OperationHandle, Operation]](this, "handleToOperation")
 
@@ -111,7 +113,7 @@ class SparkSQLOperationManager(hiveContext: HiveContext) extends OperationManage
           case ByteType =>
             to.addColumnValue(ColumnValue.byteValue(from.getByte(ordinal)))
           case ShortType =>
-            to.addColumnValue(ColumnValue.intValue(from.getShort(ordinal)))
+            to.addColumnValue(ColumnValue.shortValue(from.getShort(ordinal)))
           case TimestampType =>
             to.addColumnValue(
               ColumnValue.timestampValue(from.get(ordinal).asInstanceOf[Timestamp]))
@@ -143,7 +145,7 @@ class SparkSQLOperationManager(hiveContext: HiveContext) extends OperationManage
           case ByteType =>
             to.addColumnValue(ColumnValue.byteValue(null))
           case ShortType =>
-            to.addColumnValue(ColumnValue.intValue(null))
+            to.addColumnValue(ColumnValue.shortValue(null))
           case TimestampType =>
             to.addColumnValue(ColumnValue.timestampValue(null))
           case BinaryType | _: ArrayType | _: StructType | _: MapType =>
@@ -197,6 +199,7 @@ class SparkSQLOperationManager(hiveContext: HiveContext) extends OperationManage
           // Actually do need to catch Throwable as some failures don't inherit from Exception and
           // HiveServer will silently swallow them.
           case e: Throwable =>
+            setState(OperationState.ERROR)
             logError("Error executing query:",e)
             throw new HiveSQLException(e.toString)
         }

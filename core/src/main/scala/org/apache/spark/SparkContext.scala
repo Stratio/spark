@@ -21,6 +21,7 @@ import scala.language.implicitConversions
 
 import java.io._
 import java.net.URI
+import java.util.Arrays
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.{Properties, UUID}
 import java.util.UUID.randomUUID
@@ -220,8 +221,17 @@ class SparkContext(config: SparkConf) extends Logging {
     new MetadataCleaner(MetadataCleanerType.SPARK_CONTEXT, this.cleanup, conf)
 
   // Initialize the Spark UI, registering all associated listeners
-  private[spark] val ui = new SparkUI(this)
-  ui.bind()
+  private[spark] val ui: Option[SparkUI] =
+    if (conf.getBoolean("spark.ui.enabled", true)) {
+      Some(new SparkUI(this))
+    } else {
+      // For tests, do not enable the UI
+      None
+    }
+
+  // Bind the UI before starting the task scheduler to communicate
+  // the bound port to the cluster manager properly
+  ui.foreach(_.bind())
 
   /** A default Hadoop Configuration for the Hadoop code (e.g. file systems) that we reuse. */
   val hadoopConfiguration: Configuration = {
@@ -1008,7 +1018,7 @@ class SparkContext(config: SparkConf) extends Logging {
   /** Shut down the SparkContext. */
   def stop() {
     postApplicationEnd()
-    ui.stop()
+    ui.foreach(_.stop())
     // Do this only if not stopped already - best case effort.
     // prevent NPE if stopped more than once.
     val dagSchedulerCopy = dagScheduler
@@ -1042,28 +1052,40 @@ class SparkContext(config: SparkConf) extends Logging {
   }
 
   /**
-   * Support function for API backtraces.
+   * Set the thread-local property for overriding the call sites
+   * of actions and RDDs.
    */
-  def setCallSite(site: String) {
-    setLocalProperty("externalCallSite", site)
+  def setCallSite(shortCallSite: String) {
+    setLocalProperty(CallSite.SHORT_FORM, shortCallSite)
   }
 
   /**
-   * Support function for API backtraces.
+   * Set the thread-local property for overriding the call sites
+   * of actions and RDDs.
+   */
+  private[spark] def setCallSite(callSite: CallSite) {
+    setLocalProperty(CallSite.SHORT_FORM, callSite.shortForm)
+    setLocalProperty(CallSite.LONG_FORM, callSite.longForm)
+  }
+
+  /**
+   * Clear the thread-local property for overriding the call sites
+   * of actions and RDDs.
    */
   def clearCallSite() {
-    setLocalProperty("externalCallSite", null)
+    setLocalProperty(CallSite.SHORT_FORM, null)
+    setLocalProperty(CallSite.LONG_FORM, null)
   }
 
   /**
    * Capture the current user callsite and return a formatted version for printing. If the user
-   * has overridden the call site, this will return the user's version.
+   * has overridden the call site using `setCallSite()`, this will return the user's version.
    */
   private[spark] def getCallSite(): CallSite = {
-    Option(getLocalProperty("externalCallSite")) match {
-      case Some(callSite) => CallSite(callSite, longForm = "")
-      case None => Utils.getCallSite
-    }
+    Option(getLocalProperty(CallSite.SHORT_FORM)).map { case shortCallSite =>
+      val longCallSite = Option(getLocalProperty(CallSite.LONG_FORM)).getOrElse("")
+      CallSite(shortCallSite, longCallSite)
+    }.getOrElse(Utils.getCallSite())
   }
 
   /**
@@ -1312,7 +1334,7 @@ class SparkContext(config: SparkConf) extends Logging {
  */
 object SparkContext extends Logging {
 
-  private[spark] val SPARK_VERSION = "1.1.0"
+  private[spark] val SPARK_VERSION = "1.1.1"
 
   private[spark] val SPARK_JOB_DESCRIPTION = "spark.job.description"
 
@@ -1411,7 +1433,10 @@ object SparkContext extends Logging {
     simpleWritableConverter[Boolean, BooleanWritable](_.get)
 
   implicit def bytesWritableConverter(): WritableConverter[Array[Byte]] = {
-    simpleWritableConverter[Array[Byte], BytesWritable](_.getBytes)
+    simpleWritableConverter[Array[Byte], BytesWritable](bw =>
+      // getBytes method returns array which is longer then data to be returned
+      Arrays.copyOfRange(bw.getBytes, 0, bw.getLength)
+    )
   }
 
   implicit def stringWritableConverter(): WritableConverter[String] =

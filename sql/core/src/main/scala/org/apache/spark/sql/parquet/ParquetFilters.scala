@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.expressions.{Predicate => CatalystPredicate
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.execution.SparkSqlSerializer
 
-object ParquetFilters {
+private[sql] object ParquetFilters {
   val PARQUET_FILTER_DATA = "org.apache.spark.sql.parquet.row.filter"
   // set this to false if pushdown should be disabled
   val PARQUET_FILTER_PUSHDOWN_ENABLED = "spark.sql.hints.parquetFilterPushdown"
@@ -213,22 +213,27 @@ object ParquetFilters {
         Some(createEqualityFilter(right.name, left, p))
       case p @ EqualTo(left: NamedExpression, right: Literal) if !left.nullable =>
         Some(createEqualityFilter(left.name, right, p))
+
       case p @ LessThan(left: Literal, right: NamedExpression) if !right.nullable =>
-        Some(createLessThanFilter(right.name, left, p))
+        Some(createGreaterThanFilter(right.name, left, p))
       case p @ LessThan(left: NamedExpression, right: Literal) if !left.nullable =>
         Some(createLessThanFilter(left.name, right, p))
+
       case p @ LessThanOrEqual(left: Literal, right: NamedExpression) if !right.nullable =>
-        Some(createLessThanOrEqualFilter(right.name, left, p))
+        Some(createGreaterThanOrEqualFilter(right.name, left, p))
       case p @ LessThanOrEqual(left: NamedExpression, right: Literal) if !left.nullable =>
         Some(createLessThanOrEqualFilter(left.name, right, p))
+
       case p @ GreaterThan(left: Literal, right: NamedExpression) if !right.nullable =>
-        Some(createGreaterThanFilter(right.name, left, p))
+        Some(createLessThanFilter(right.name, left, p))
       case p @ GreaterThan(left: NamedExpression, right: Literal) if !left.nullable =>
         Some(createGreaterThanFilter(left.name, right, p))
+
       case p @ GreaterThanOrEqual(left: Literal, right: NamedExpression) if !right.nullable =>
-        Some(createGreaterThanOrEqualFilter(right.name, left, p))
+        Some(createLessThanOrEqualFilter(right.name, left, p))
       case p @ GreaterThanOrEqual(left: NamedExpression, right: Literal) if !left.nullable =>
         Some(createGreaterThanOrEqualFilter(left.name, right, p))
+
       case _ => None
     }
   }

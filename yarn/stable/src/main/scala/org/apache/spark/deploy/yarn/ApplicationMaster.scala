@@ -33,7 +33,6 @@ import org.apache.hadoop.yarn.client.api.AMRMClient
 import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest
 import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.util.ConverterUtils
-import org.apache.hadoop.yarn.webapp.util.WebAppUtils
 
 import org.apache.spark.{Logging, SecurityManager, SparkConf, SparkContext}
 import org.apache.spark.deploy.SparkHadoopUtil
@@ -130,14 +129,9 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration,
   private def addAmIpFilter() {
     val amFilter = "org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter"
     System.setProperty("spark.ui.filters", amFilter)
-    val proxy = WebAppUtils.getProxyHostAndPort(conf)
-    val parts : Array[String] = proxy.split(":")
-    val uriBase = "http://" + proxy +
-      System.getenv(ApplicationConstants.APPLICATION_WEB_PROXY_BASE_ENV)
-
-    val params = "PROXY_HOST=" + parts(0) + "," + "PROXY_URI_BASE=" + uriBase
-    System.setProperty(
-      "spark.org.apache.hadoop.yarn.server.webproxy.amfilter.AmIpFilter.params", params)
+    val proxyBase = System.getenv(ApplicationConstants.APPLICATION_WEB_PROXY_BASE_ENV)
+    val params = YarnStableUtils.getAmIpFilterParams(yarnConf, proxyBase)
+    params.foreach { case (k, v) => System.setProperty(s"spark.$amFilter.param.$k", v) }
   }
 
   private def registerApplicationMaster(): RegisterApplicationMasterResponse = {
@@ -198,7 +192,7 @@ class ApplicationMaster(args: ApplicationMasterArguments, conf: Configuration,
         assert(sparkContext != null || numTries >= maxNumTries)
 
         if (sparkContext != null) {
-          uiAddress = sparkContext.ui.appUIHostPort
+          uiAddress = sparkContext.ui.map(_.appUIHostPort).getOrElse("")
           uiHistoryAddress = YarnSparkHadoopUtil.getUIHistoryAddress(sparkContext, sparkConf)
           this.yarnAllocator = YarnAllocationHandler.newAllocator(
             yarnConf,

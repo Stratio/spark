@@ -62,6 +62,8 @@ class BlockManagerId private (
 
   def nettyPort: Int = nettyPort_
 
+  def isDriver: Boolean = (executorId == "<driver>")
+
   override def writeExternal(out: ObjectOutput) {
     out.writeUTF(executorId_)
     out.writeUTF(host_)
@@ -69,7 +71,7 @@ class BlockManagerId private (
     out.writeInt(nettyPort_)
   }
 
-  override def readExternal(in: ObjectInput) {
+  override def readExternal(in: ObjectInput): Unit = Utils.tryOrIOException {
     executorId_ = in.readUTF()
     host_ = in.readUTF()
     port_ = in.readInt()

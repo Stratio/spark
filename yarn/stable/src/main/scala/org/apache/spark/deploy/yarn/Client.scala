@@ -28,7 +28,7 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.ipc.YarnRPC
 import org.apache.hadoop.yarn.util.Records
 
-import org.apache.spark.{Logging, SparkConf}
+import org.apache.spark.{Logging, SparkConf, SparkException}
 
 
 /**
@@ -94,22 +94,15 @@ class Client(clientArgs: ClientArguments, hadoopConf: Configuration, spConf: Spa
 
   def run() {
     val appId = runApp()
-    monitorApplication(appId)
+    if (!monitorApplication(appId)) {
+      throw new SparkException("Application is not successful")
+    }
   }
 
   def logClusterResourceDetails() {
     val clusterMetrics: YarnClusterMetrics = yarnClient.getYarnClusterMetrics
     logInfo("Got cluster metric info from ResourceManager, number of NodeManagers: " +
       clusterMetrics.getNumNodeManagers)
-  }
-
-  def calculateAMMemory(newApp: GetNewApplicationResponse) :Int = {
-    // TODO: Need a replacement for the following code to fix -Xmx?
-    // val minResMemory: Int = newApp.getMinimumResourceCapability().getMemory()
-    // var amMemory = ((args.amMemory / minResMemory) * minResMemory) +
-    //  ((if ((args.amMemory % minResMemory) == 0) 0 else minResMemory) -
-    //    memoryOverhead )
-    args.amMemory
   }
 
   def setupSecurityToken(amContainer: ContainerLaunchContext) = {
@@ -153,10 +146,12 @@ class Client(clientArgs: ClientArguments, hadoopConf: Configuration, spConf: Spa
       )
 
       val state = report.getYarnApplicationState()
-      if (state == YarnApplicationState.FINISHED ||
-        state == YarnApplicationState.FAILED ||
+      if (state == YarnApplicationState.FINISHED) {
+        return report.getFinalApplicationStatus() == FinalApplicationStatus.SUCCEEDED
+      }
+      if (state == YarnApplicationState.FAILED ||
         state == YarnApplicationState.KILLED) {
-        return true
+        return false
       }
     }
     true
@@ -177,17 +172,8 @@ object Client {
     System.setProperty("SPARK_YARN_MODE", "true")
     val sparkConf = new SparkConf()
 
-    try {
-      val args = new ClientArguments(argStrings, sparkConf)
-      new Client(args, sparkConf).run()
-    } catch {
-      case e: Exception => {
-        Console.err.println(e.getMessage)
-        System.exit(1)
-      }
-    }
-
-    System.exit(0)
+    val args = new ClientArguments(argStrings, sparkConf)
+    new Client(args, sparkConf).run()
   }
 
 }

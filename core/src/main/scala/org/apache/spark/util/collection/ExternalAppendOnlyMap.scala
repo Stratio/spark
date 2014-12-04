@@ -28,10 +28,11 @@ import com.google.common.io.ByteStreams
 
 import org.apache.spark.{Logging, SparkEnv}
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.executor.ShuffleWriteMetrics
 import org.apache.spark.serializer.{DeserializationStream, Serializer}
+import org.apache.spark.shuffle.ShuffleMemoryManager
 import org.apache.spark.storage.{BlockId, BlockManager}
 import org.apache.spark.util.collection.ExternalAppendOnlyMap.HashComparator
-import org.apache.spark.executor.ShuffleWriteMetrics
 
 /**
  * :: DeveloperApi ::
@@ -81,8 +82,14 @@ class ExternalAppendOnlyMap[K, V, C](
   // Number of in-memory pairs inserted before tracking the map's shuffle memory usage
   private val trackMemoryThreshold = 1000
 
-  // How much of the shared memory pool this collection has claimed
-  private var myMemoryThreshold = 0L
+  // Initial threshold for the size of a collection before we start tracking its memory usage
+  private val initialMemoryThreshold =
+    SparkEnv.get.conf.getLong("spark.shuffle.spill.initialMemoryThreshold",
+      ShuffleMemoryManager.DEFAULT_INITIAL_MEMORY_THRESHOLD)
+
+  // Threshold for the collection's size in bytes before we start tracking its memory usage
+  // To avoid a large number of small spills, initialize this to a value orders of magnitude > 0
+  private var myMemoryThreshold = initialMemoryThreshold
 
   /**
    * Size of object batches when reading/writing from serializers.
@@ -174,9 +181,10 @@ class ExternalAppendOnlyMap[K, V, C](
   private def spill(mapSize: Long): Unit = {
     spillCount += 1
     val threadId = Thread.currentThread().getId
-    logInfo("Thread %d spilling in-memory map of %d MB to disk (%d time%s so far)"
-      .format(threadId, mapSize / (1024 * 1024), spillCount, if (spillCount > 1) "s" else ""))
-    val (blockId, file) = diskBlockManager.createTempBlock()
+    logInfo("Thread %d spilling in-memory batch of %s to disk (%d times%s so far)"
+      .format(threadId, org.apache.spark.util.Utils.bytesToString(mapSize),
+        spillCount, if (spillCount > 1) "s" else ""))
+    val (blockId, file) = diskBlockManager.createTempLocalBlock()
     curWriteMetrics = new ShuffleWriteMetrics()
     var writer = blockManager.getDiskWriter(blockId, file, serializer, fileBufferSize,
       curWriteMetrics)
@@ -235,8 +243,11 @@ class ExternalAppendOnlyMap[K, V, C](
     spilledMaps.append(new DiskMapIterator(file, blockId, batchSizes))
 
     // Release our memory back to the shuffle pool so that other threads can grab it
-    shuffleMemoryManager.release(myMemoryThreshold)
-    myMemoryThreshold = 0L
+    // The amount we requested does not include the initial memory tracking threshold
+    shuffleMemoryManager.release(myMemoryThreshold - initialMemoryThreshold)
+
+    // Reset this to the initial threshold to avoid spilling many small files
+    myMemoryThreshold = initialMemoryThreshold
 
     elementsRead = 0
     _memoryBytesSpilled += mapSize

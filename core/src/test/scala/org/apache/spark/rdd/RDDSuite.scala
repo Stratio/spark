@@ -521,6 +521,13 @@ class RDDSuite extends FunSuite with SharedSparkContext {
     assert(sortedLowerK === Array(1, 2, 3, 4, 5))
   }
 
+  test("takeOrdered with limit 0") {
+    val nums = Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+    val rdd = sc.makeRDD(nums, 2)
+    val sortedLowerK = rdd.takeOrdered(0)
+    assert(sortedLowerK.size === 0)
+  }
+
   test("takeOrdered with custom ordering") {
     val nums = Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     implicit val ord = implicitly[Ordering[Int]].reverse
@@ -710,6 +717,11 @@ class RDDSuite extends FunSuite with SharedSparkContext {
     ranked.collect().foreach { x =>
       assert(x._1 === x._2)
     }
+  }
+
+  test("zipWithIndex chained with other RDDs (SPARK-4433)") {
+    val count = sc.parallelize(0 until 10, 2).zipWithIndex().repartition(4).count()
+    assert(count === 10)
   }
 
   test("zipWithUniqueId") {
