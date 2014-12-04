@@ -50,5 +50,4 @@ for jar in $(ls $CONFDIR/../lib/*.jar); do
 done
 
 export SPARK_CLASSPATH
-#export SPARK_JAVA_OPTS="-Djava.net.preferIPv4Stack=true -Dcassandra.config=/opt/sds/apache-cassandra-2.0
-.53/conf/cassandra.yaml"
+#export SPARK_JAVA_OPTS="-Djava.net.preferIPv4Stack=true -Dcassandra.config=/opt/sds/apache-cassandra-2.0.53/conf/cassandra.yaml"
