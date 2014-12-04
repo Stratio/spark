@@ -10,5 +10,5 @@
 # Example 2:
 # spark.master            mesos://zk://denethor:2181/mesos
 # spark.serializer        org.apache.spark.serializer.KryoSerializer
-# spark.kryo.registrator  com.stratio.deep.serializer.DeepKryoRegistrator
+# spark.kryo.registrator  com.stratio.deep.core.serializer.DeepKryoRegistrator
 # spark.home              /opt/spark
