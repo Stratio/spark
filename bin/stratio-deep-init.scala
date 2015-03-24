@@ -24,6 +24,10 @@ import com.stratio.deep.es.extractor._
 import com.stratio.deep.aerospike.config._
 import com.stratio.deep.aerospike.extractor._
 
+//JDBC
+import com.stratio.deep.jdbc.config._
+import com.stratio.deep.jdbc.extractor._
+
 //Spark
 import org.apache.spark.rdd._
 import org.apache.spark.SparkContext._
