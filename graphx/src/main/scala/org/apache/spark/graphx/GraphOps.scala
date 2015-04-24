@@ -69,12 +69,11 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    */
   private def degreesRDD(edgeDirection: EdgeDirection): VertexRDD[Int] = {
     if (edgeDirection == EdgeDirection.In) {
-      graph.aggregateMessages(_.sendToDst(1), _ + _, TripletFields.None)
+      graph.mapReduceTriplets(et => Iterator((et.dstId,1)), _ + _)
     } else if (edgeDirection == EdgeDirection.Out) {
-      graph.aggregateMessages(_.sendToSrc(1), _ + _, TripletFields.None)
+      graph.mapReduceTriplets(et => Iterator((et.srcId,1)), _ + _)
     } else { // EdgeDirection.Either
-      graph.aggregateMessages(ctx => { ctx.sendToSrc(1); ctx.sendToDst(1) }, _ + _,
-        TripletFields.None)
+      graph.mapReduceTriplets(et => Iterator((et.srcId,1), (et.dstId,1)), _ + _)
     }
   }
 
@@ -89,17 +88,18 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
   def collectNeighborIds(edgeDirection: EdgeDirection): VertexRDD[Array[VertexId]] = {
     val nbrs =
       if (edgeDirection == EdgeDirection.Either) {
-        graph.aggregateMessages[Array[VertexId]](
-          ctx => { ctx.sendToSrc(Array(ctx.dstId)); ctx.sendToDst(Array(ctx.srcId)) },
-          _ ++ _, TripletFields.None)
+        graph.mapReduceTriplets[Array[VertexId]](
+          mapFunc = et => Iterator((et.srcId, Array(et.dstId)), (et.dstId, Array(et.srcId))),
+          reduceFunc = _ ++ _
+        )
       } else if (edgeDirection == EdgeDirection.Out) {
-        graph.aggregateMessages[Array[VertexId]](
-          ctx => ctx.sendToSrc(Array(ctx.dstId)),
-          _ ++ _, TripletFields.None)
+        graph.mapReduceTriplets[Array[VertexId]](
+          mapFunc = et => Iterator((et.srcId, Array(et.dstId))),
+          reduceFunc = _ ++ _)
       } else if (edgeDirection == EdgeDirection.In) {
-        graph.aggregateMessages[Array[VertexId]](
-          ctx => ctx.sendToDst(Array(ctx.srcId)),
-          _ ++ _, TripletFields.None)
+        graph.mapReduceTriplets[Array[VertexId]](
+          mapFunc = et => Iterator((et.dstId, Array(et.srcId))),
+          reduceFunc = _ ++ _)
       } else {
         throw new SparkException("It doesn't make sense to collect neighbor ids without a " +
           "direction. (EdgeDirection.Both is not supported; use EdgeDirection.Either instead.)")
@@ -122,27 +122,22 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    * @return the vertex set of neighboring vertex attributes for each vertex
    */
   def collectNeighbors(edgeDirection: EdgeDirection): VertexRDD[Array[(VertexId, VD)]] = {
-    val nbrs = edgeDirection match {
-      case EdgeDirection.Either =>
-        graph.aggregateMessages[Array[(VertexId,VD)]](
-          ctx => {
-            ctx.sendToSrc(Array((ctx.dstId, ctx.dstAttr)))
-            ctx.sendToDst(Array((ctx.srcId, ctx.srcAttr)))
-          },
-          (a, b) => a ++ b, TripletFields.All)
-      case EdgeDirection.In =>
-        graph.aggregateMessages[Array[(VertexId,VD)]](
-          ctx => ctx.sendToDst(Array((ctx.srcId, ctx.srcAttr))),
-          (a, b) => a ++ b, TripletFields.Src)
-      case EdgeDirection.Out =>
-        graph.aggregateMessages[Array[(VertexId,VD)]](
-          ctx => ctx.sendToSrc(Array((ctx.dstId, ctx.dstAttr))),
-          (a, b) => a ++ b, TripletFields.Dst)
-      case EdgeDirection.Both =>
-        throw new SparkException("collectEdges does not support EdgeDirection.Both. Use" +
-          "EdgeDirection.Either instead.")
-    }
-    graph.vertices.leftJoin(nbrs) { (vid, vdata, nbrsOpt) =>
+    val nbrs = graph.mapReduceTriplets[Array[(VertexId,VD)]](
+      edge => {
+        val msgToSrc = (edge.srcId, Array((edge.dstId, edge.dstAttr)))
+        val msgToDst = (edge.dstId, Array((edge.srcId, edge.srcAttr)))
+        edgeDirection match {
+          case EdgeDirection.Either => Iterator(msgToSrc, msgToDst)
+          case EdgeDirection.In => Iterator(msgToDst)
+          case EdgeDirection.Out => Iterator(msgToSrc)
+          case EdgeDirection.Both =>
+            throw new SparkException("collectNeighbors does not support EdgeDirection.Both. Use" +
+              "EdgeDirection.Either instead.")
+        }
+      },
+      (a, b) => a ++ b)
+
+    graph.vertices.leftZipJoin(nbrs) { (vid, vdata, nbrsOpt) =>
       nbrsOpt.getOrElse(Array.empty[(VertexId, VD)])
     }
   } // end of collectNeighbor
@@ -165,20 +160,18 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
   def collectEdges(edgeDirection: EdgeDirection): VertexRDD[Array[Edge[ED]]] = {
     edgeDirection match {
       case EdgeDirection.Either =>
-        graph.aggregateMessages[Array[Edge[ED]]](
-          ctx => {
-            ctx.sendToSrc(Array(new Edge(ctx.srcId, ctx.dstId, ctx.attr)))
-            ctx.sendToDst(Array(new Edge(ctx.srcId, ctx.dstId, ctx.attr)))
-          },
-          (a, b) => a ++ b, TripletFields.EdgeOnly)
+        graph.mapReduceTriplets[Array[Edge[ED]]](
+          edge => Iterator((edge.srcId, Array(new Edge(edge.srcId, edge.dstId, edge.attr))),
+                           (edge.dstId, Array(new Edge(edge.srcId, edge.dstId, edge.attr)))),
+          (a, b) => a ++ b)
       case EdgeDirection.In =>
-        graph.aggregateMessages[Array[Edge[ED]]](
-          ctx => ctx.sendToDst(Array(new Edge(ctx.srcId, ctx.dstId, ctx.attr))),
-          (a, b) => a ++ b, TripletFields.EdgeOnly)
+        graph.mapReduceTriplets[Array[Edge[ED]]](
+          edge => Iterator((edge.dstId, Array(new Edge(edge.srcId, edge.dstId, edge.attr)))),
+          (a, b) => a ++ b)
       case EdgeDirection.Out =>
-        graph.aggregateMessages[Array[Edge[ED]]](
-          ctx => ctx.sendToSrc(Array(new Edge(ctx.srcId, ctx.dstId, ctx.attr))),
-          (a, b) => a ++ b, TripletFields.EdgeOnly)
+        graph.mapReduceTriplets[Array[Edge[ED]]](
+          edge => Iterator((edge.srcId, Array(new Edge(edge.srcId, edge.dstId, edge.attr)))),
+          (a, b) => a ++ b)
       case EdgeDirection.Both =>
         throw new SparkException("collectEdges does not support EdgeDirection.Both. Use" +
           "EdgeDirection.Either instead.")
@@ -261,7 +254,7 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    * Picks a random vertex from the graph and returns its ID.
    */
   def pickRandomVertex(): VertexId = {
-    val probability = 50.0 / graph.numVertices
+    val probability = 50 / graph.numVertices
     var found = false
     var retVal: VertexId = null.asInstanceOf[VertexId]
     while (!found) {
@@ -276,32 +269,6 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
       }
     }
    retVal
-  }
-
-  /**
-   * Convert bi-directional edges into uni-directional ones.
-   * Some graph algorithms (e.g., TriangleCount) assume that an input graph
-   * has its edges in canonical direction.
-   * This function rewrites the vertex ids of edges so that srcIds are bigger
-   * than dstIds, and merges the duplicated edges.
-   *
-   * @param mergeFunc the user defined reduce function which should
-   * be commutative and associative and is used to combine the output
-   * of the map phase
-   *
-   * @return the resulting graph with canonical edges
-   */
-  def convertToCanonicalEdges(
-      mergeFunc: (ED, ED) => ED = (e1, e2) => e1): Graph[VD, ED] = {
-    val newEdges =
-      graph.edges
-        .map {
-          case e if e.srcId < e.dstId => ((e.srcId, e.dstId), e.attr)
-          case e => ((e.dstId, e.srcId), e.attr)
-        }
-        .reduceByKey(mergeFunc)
-        .map(e => new Edge(e._1._1, e._1._2, e._2))
-    Graph(graph.vertices, newEdges)
   }
 
   /**

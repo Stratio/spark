@@ -20,6 +20,7 @@ package org.apache.spark.streaming
 import org.apache.spark.Logging
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.util.Utils
+import org.apache.spark.streaming.StreamingContext._
 
 import scala.util.Random
 import scala.collection.mutable.ArrayBuffer
@@ -351,7 +352,8 @@ class FileGeneratingThread(input: Seq[String], testDir: Path, interval: Long)
   extends Thread with Logging {
 
   override def run() {
-    val localTestDir = Utils.createTempDir()
+    val localTestDir = Files.createTempDir()
+    localTestDir.deleteOnExit()
     var fs = testDir.getFileSystem(new Configuration())
     val maxTries = 3
     try {

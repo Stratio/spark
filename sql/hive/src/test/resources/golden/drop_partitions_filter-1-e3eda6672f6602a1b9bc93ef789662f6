@@ -1,10 +1,10 @@
-a                   	string              	                    
-b                   	int                 	                    
-c                   	string              	                    
-d                   	string              	                    
+a                   	string              	None                
+b                   	int                 	None                
+c                   	string              	None                
+d                   	string              	None                
 	 	 
 # Partition Information	 	 
 # col_name            	data_type           	comment             
 	 	 
-c                   	string              	                    
-d                   	string              	                    
+c                   	string              	None                
+d                   	string              	None                

@@ -24,19 +24,18 @@ import org.apache.hadoop.io.ObjectWritable
 import org.apache.hadoop.io.Writable
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.util.Utils
 
 @DeveloperApi
 class SerializableWritable[T <: Writable](@transient var t: T) extends Serializable {
   def value = t
   override def toString = t.toString
 
-  private def writeObject(out: ObjectOutputStream): Unit = Utils.tryOrIOException {
+  private def writeObject(out: ObjectOutputStream) {
     out.defaultWriteObject()
     new ObjectWritable(t).write(out)
   }
 
-  private def readObject(in: ObjectInputStream): Unit = Utils.tryOrIOException {
+  private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     val ow = new ObjectWritable()
     ow.setConf(new Configuration())

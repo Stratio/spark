@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 CREATE TABLE src_index_test_rc (key int, value string) STORED AS RCFILE;
 
 INSERT OVERWRITE TABLE src_index_test_rc SELECT * FROM src;

@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION hex;
 DESCRIBE FUNCTION EXTENDED hex;
 
@@ -9,14 +7,14 @@ SELECT
   hex('Facebook'),
   hex('\0'),
   hex('qwertyuiopasdfghjkl')
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 -- If the argument is a number, hex should convert it to hexadecimal.
 SELECT
   hex(1),
   hex(0),
   hex(4207849477)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 -- Negative numbers should be treated as two's complement (64 bit).
-SELECT hex(-5) FROM src tablesample (1 rows);
+SELECT hex(-5) FROM src LIMIT 1;

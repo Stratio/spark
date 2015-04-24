@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION locate;
 DESCRIBE FUNCTION EXTENDED locate;
 
@@ -21,7 +19,7 @@ SELECT locate('abc', 'abcd'),
        locate('abc', null),
        locate('abc', 'abcd', null),
        locate('abc', 'abcd', 'invalid number')
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT locate('abc', 'abcd'),
        locate('ccc', 'abcabc'),
@@ -40,4 +38,4 @@ SELECT locate('abc', 'abcd'),
        locate('abc', null),
        locate('abc', 'abcd', null),
        locate('abc', 'abcd', 'invalid number')
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

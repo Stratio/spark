@@ -17,26 +17,16 @@
 
 package org.apache.spark.mllib.tree.model
 
-import org.apache.spark.annotation.DeveloperApi
-
 /**
  * Predicted value for a node
  * @param predict predicted value
  * @param prob probability of the label (classification only)
  */
-@DeveloperApi
-class Predict(
+private[tree] class Predict(
     val predict: Double,
     val prob: Double = 0.0) extends Serializable {
 
   override def toString = {
     "predict = %f, prob = %f".format(predict, prob)
-  }
-
-  override def equals(other: Any): Boolean = {
-    other match {
-      case p: Predict => predict == p.predict && prob == p.prob
-      case _ => false
-    }
   }
 }

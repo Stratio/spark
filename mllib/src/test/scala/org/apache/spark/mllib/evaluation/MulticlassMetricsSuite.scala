@@ -20,9 +20,9 @@ package org.apache.spark.mllib.evaluation
 import org.scalatest.FunSuite
 
 import org.apache.spark.mllib.linalg.Matrices
-import org.apache.spark.mllib.util.MLlibTestSparkContext
+import org.apache.spark.mllib.util.LocalSparkContext
 
-class MulticlassMetricsSuite extends FunSuite with MLlibTestSparkContext {
+class MulticlassMetricsSuite extends FunSuite with LocalSparkContext {
   test("Multiclass evaluation metrics") {
     /*
      * Confusion matrix for 3-class classification with total 9 instances:

@@ -1,7 +1,6 @@
 ---
 layout: global
-displayTitle: Bagel Programming Guide
-title: Bagel
+title: Bagel Programming Guide
 ---
 
 **Bagel will soon be superseded by [GraphX](graphx-programming-guide.html); we recommend that new users try GraphX instead.**

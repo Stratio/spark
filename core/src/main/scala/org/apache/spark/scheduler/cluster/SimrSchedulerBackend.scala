@@ -22,7 +22,6 @@ import org.apache.hadoop.fs.{Path, FileSystem}
 import org.apache.spark.{Logging, SparkContext, SparkEnv}
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler.TaskSchedulerImpl
-import org.apache.spark.util.AkkaUtils
 
 private[spark] class SimrSchedulerBackend(
     scheduler: TaskSchedulerImpl,
@@ -39,8 +38,7 @@ private[spark] class SimrSchedulerBackend(
   override def start() {
     super.start()
 
-    val driverUrl = AkkaUtils.address(
-      AkkaUtils.protocol(actorSystem),
+    val driverUrl = "akka.tcp://%s@%s:%s/user/%s".format(
       SparkEnv.driverActorSystemName,
       sc.conf.get("spark.driver.host"),
       sc.conf.get("spark.driver.port"),

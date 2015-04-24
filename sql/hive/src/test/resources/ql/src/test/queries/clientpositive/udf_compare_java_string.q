@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 EXPLAIN
 CREATE TEMPORARY FUNCTION test_udf_get_java_string AS 'org.apache.hadoop.hive.ql.udf.generic.GenericUDFTestGetJavaString';
 

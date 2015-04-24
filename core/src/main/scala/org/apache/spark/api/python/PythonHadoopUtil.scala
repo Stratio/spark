@@ -61,7 +61,8 @@ private[python] object Converter extends Logging {
  * Other objects are passed through without conversion.
  */
 private[python] class WritableToJavaConverter(
-    conf: Broadcast[SerializableWritable[Configuration]]) extends Converter[Any, Any] {
+    conf: Broadcast[SerializableWritable[Configuration]],
+    batchSize: Int) extends Converter[Any, Any] {
 
   /**
    * Converts a [[org.apache.hadoop.io.Writable]] to the underlying primitive, String or
@@ -93,7 +94,8 @@ private[python] class WritableToJavaConverter(
           map.put(convertWritable(k), convertWritable(v))
         }
         map
-      case w: Writable => WritableUtils.clone(w, conf.value.value)
+      case w: Writable =>
+        if (batchSize > 1) WritableUtils.clone(w, conf.value.value) else w
       case other => other
     }
   }
@@ -138,11 +140,6 @@ private[python] class JavaToWritableConverter extends Converter[Any, Writable] {
           mapWritable.put(convertToWritable(k), convertToWritable(v))
         }
         mapWritable
-      case array: Array[Any] => {
-        val arrayWriteable = new ArrayWritable(classOf[Writable])
-        arrayWriteable.set(array.map(convertToWritable(_)))
-        arrayWriteable
-      }
       case other => throw new SparkException(
         s"Data of type ${other.getClass.getName} cannot be used")
     }

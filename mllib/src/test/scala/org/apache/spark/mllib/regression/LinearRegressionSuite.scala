@@ -23,16 +23,9 @@ import org.scalatest.FunSuite
 
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.util.{LocalClusterSparkContext, LinearDataGenerator,
-  MLlibTestSparkContext}
-import org.apache.spark.util.Utils
+  LocalSparkContext}
 
-private object LinearRegressionSuite {
-
-  /** 3 features */
-  val model = new LinearRegressionModel(weights = Vectors.dense(0.1, 0.2, 0.3), intercept = 0.5)
-}
-
-class LinearRegressionSuite extends FunSuite with MLlibTestSparkContext {
+class LinearRegressionSuite extends FunSuite with LocalSparkContext {
 
   def validatePrediction(predictions: Seq[Double], input: Seq[LabeledPoint]) {
     val numOffPredictions = predictions.zip(input).count { case (prediction, expected) =>
@@ -130,23 +123,6 @@ class LinearRegressionSuite extends FunSuite with MLlibTestSparkContext {
     // Test prediction on Array.
     validatePrediction(
       sparseValidationData.map(row => model.predict(row.features)), sparseValidationData)
-  }
-
-  test("model save/load") {
-    val model = LinearRegressionSuite.model
-
-    val tempDir = Utils.createTempDir()
-    val path = tempDir.toURI.toString
-
-    // Save model, load it back, and compare.
-    try {
-      model.save(sc, path)
-      val sameModel = LinearRegressionModel.load(sc, path)
-      assert(model.weights == sameModel.weights)
-      assert(model.intercept == sameModel.intercept)
-    } finally {
-      Utils.deleteRecursively(tempDir)
-    }
   }
 }
 

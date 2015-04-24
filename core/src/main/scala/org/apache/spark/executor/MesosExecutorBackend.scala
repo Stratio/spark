@@ -19,16 +19,13 @@ package org.apache.spark.executor
 
 import java.nio.ByteBuffer
 
-import scala.collection.JavaConversions._
-
 import org.apache.mesos.protobuf.ByteString
-import org.apache.mesos.{Executor => MesosExecutor, ExecutorDriver, MesosExecutorDriver}
+import org.apache.mesos.{Executor => MesosExecutor, ExecutorDriver, MesosExecutorDriver, MesosNativeLibrary}
 import org.apache.mesos.Protos.{TaskStatus => MesosTaskStatus, _}
 
-import org.apache.spark.{Logging, TaskState, SparkConf, SparkEnv}
+import org.apache.spark.{Logging, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.deploy.SparkHadoopUtil
-import org.apache.spark.scheduler.cluster.mesos.{MesosTaskLaunchData}
 import org.apache.spark.util.{SignalLogger, Utils}
 
 private[spark] class MesosExecutorBackend
@@ -53,39 +50,21 @@ private[spark] class MesosExecutorBackend
       executorInfo: ExecutorInfo,
       frameworkInfo: FrameworkInfo,
       slaveInfo: SlaveInfo) {
-
-    // Get num cores for this task from ExecutorInfo, created in MesosSchedulerBackend.
-    val cpusPerTask = executorInfo.getResourcesList
-      .find(_.getName == "cpus")
-      .map(_.getScalar.getValue.toInt)
-      .getOrElse(0)
-    val executorId = executorInfo.getExecutorId.getValue
-
-    logInfo(s"Registered with Mesos as executor ID $executorId with $cpusPerTask cpus")
+    logInfo("Registered with Mesos as executor ID " + executorInfo.getExecutorId.getValue)
     this.driver = driver
-    val properties = Utils.deserialize[Array[(String, String)]](executorInfo.getData.toByteArray) ++
-      Seq[(String, String)](("spark.app.id", frameworkInfo.getId.getValue))
-    val conf = new SparkConf(loadDefaults = true).setAll(properties)
-    val port = conf.getInt("spark.executor.port", 0)
-    val env = SparkEnv.createExecutorEnv(
-      conf, executorId, slaveInfo.getHostname, port, cpusPerTask, isLocal = false)
-
+    val properties = Utils.deserialize[Array[(String, String)]](executorInfo.getData.toByteArray)
     executor = new Executor(
-      executorId,
+      executorInfo.getExecutorId.getValue,
       slaveInfo.getHostname,
-      env)
+      properties)
   }
 
   override def launchTask(d: ExecutorDriver, taskInfo: TaskInfo) {
     val taskId = taskInfo.getTaskId.getValue.toLong
-    val taskData = MesosTaskLaunchData.fromByteString(taskInfo.getData)
     if (executor == null) {
       logError("Received launchTask but executor was null")
     } else {
-      SparkHadoopUtil.get.runAsSparkUser { () =>
-        executor.launchTask(this, taskId = taskId, attemptNumber = taskData.attemptNumber,
-          taskInfo.getName, taskData.serializedTask)
-      }
+      executor.launchTask(this, taskId, taskInfo.getName, taskInfo.getData.asReadOnlyByteBuffer)
     }
   }
 
@@ -117,8 +96,11 @@ private[spark] class MesosExecutorBackend
 private[spark] object MesosExecutorBackend extends Logging {
   def main(args: Array[String]) {
     SignalLogger.register(log)
-    // Create a new Executor and start it running
-    val runner = new MesosExecutorBackend()
-    new MesosExecutorDriver(runner).run()
+    SparkHadoopUtil.get.runAsSparkUser { () =>
+        MesosNativeLibrary.load()
+        // Create a new Executor and start it running
+        val runner = new MesosExecutorBackend()
+        new MesosExecutorDriver(runner).run()
+    }
   }
 }

@@ -1,7 +1,6 @@
 ---
 layout: global
 title: Monitoring and Instrumentation
-description: Monitoring, metrics, and instrumentation guide for Spark SPARK_VERSION_SHORT
 ---
 
 There are several ways to monitor Spark applications: web UIs, metrics, and external instrumentation.
@@ -79,13 +78,6 @@ follows:
     file system.</td>
   </tr>
   <tr>
-    <td>spark.history.fs.logDirectory</td>
-    <td>file:/tmp/spark-events</td>
-    <td>
-     Directory that contains application event logs to be loaded by the history server
-    </td>
-  </tr>
-  <tr>
     <td>spark.history.fs.updateInterval</td>
     <td>10</td>
     <td>
@@ -149,8 +141,6 @@ follows:
 
 Note that in all of these UIs, the tables are sortable by clicking their headers,
 making it easy to identify slow tasks, data skew, etc.
-
-Note that the history server only displays completed Spark jobs. One way to signal the completion of a Spark job is to stop the Spark Context explicitly (`sc.stop()`), or in Python using the `with SparkContext() as sc:` to handle the Spark Context setup and tear down, and still show the job history on the UI.
 
 # Metrics
 

@@ -32,19 +32,18 @@ import org.apache.hadoop.mapreduce.{OutputFormat => NewOutputFormat}
 
 import org.apache.spark.{HashPartitioner, Partitioner}
 import org.apache.spark.Partitioner._
+import org.apache.spark.SparkContext.rddToPairRDDFunctions
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.api.java.JavaSparkContext.fakeClassTag
-import org.apache.spark.api.java.JavaUtils.mapAsSerializableJavaMap
 import org.apache.spark.api.java.function.{Function => JFunction, Function2 => JFunction2, PairFunction}
 import org.apache.spark.partial.{BoundedDouble, PartialResult}
 import org.apache.spark.rdd.{OrderedRDDFunctions, RDD}
-import org.apache.spark.rdd.RDD.rddToPairRDDFunctions
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.Utils
 
 class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
                        (implicit val kClassTag: ClassTag[K], implicit val vClassTag: ClassTag[V])
-  extends AbstractJavaRDDLike[(K, V), JavaPairRDD[K, V]] {
+  extends JavaRDDLike[(K, V), JavaPairRDD[K, V]] {
 
   override def wrapRDD(rdd: RDD[(K, V)]): JavaPairRDD[K, V] = JavaPairRDD.fromRDD(rdd)
 
@@ -266,10 +265,10 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
    * before sending results to a reducer, similarly to a "combiner" in MapReduce.
    */
   def reduceByKeyLocally(func: JFunction2[V, V, V]): java.util.Map[K, V] =
-    mapAsSerializableJavaMap(rdd.reduceByKeyLocally(func))
+    mapAsJavaMap(rdd.reduceByKeyLocally(func))
 
   /** Count the number of elements for each key, and return the result to the master as a Map. */
-  def countByKey(): java.util.Map[K, Long] = mapAsSerializableJavaMap(rdd.countByKey())
+  def countByKey(): java.util.Map[K, Long] = mapAsJavaMap(rdd.countByKey())
 
   /**
    * :: Experimental ::
@@ -278,7 +277,7 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
    */
   @Experimental
   def countByKeyApprox(timeout: Long): PartialResult[java.util.Map[K, BoundedDouble]] =
-    rdd.countByKeyApprox(timeout).map(mapAsSerializableJavaMap)
+    rdd.countByKeyApprox(timeout).map(mapAsJavaMap)
 
   /**
    * :: Experimental ::
@@ -288,7 +287,7 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
   @Experimental
   def countByKeyApprox(timeout: Long, confidence: Double = 0.95)
   : PartialResult[java.util.Map[K, BoundedDouble]] =
-    rdd.countByKeyApprox(timeout, confidence).map(mapAsSerializableJavaMap)
+    rdd.countByKeyApprox(timeout, confidence).map(mapAsJavaMap)
 
   /**
    * Aggregate the values of each key, using given combine functions and a neutral "zero value".
@@ -392,7 +391,7 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
    * Return an RDD with the elements from `this` that are not in `other`.
    *
    * Uses `this` partitioner/partition size, because even if `other` is huge, the resulting
-   * RDD will be &lt;= us.
+   * RDD will be <= us.
    */
   def subtract(other: JavaPairRDD[K, V]): JavaPairRDD[K, V] =
     fromRDD(rdd.subtract(other))
@@ -413,7 +412,7 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
    * Return an RDD with the pairs from `this` whose keys are not in `other`.
    *
    * Uses `this` partitioner/partition size, because even if `other` is huge, the resulting
-   * RDD will be &lt;= us.
+   * RDD will be <= us.
    */
   def subtractByKey[W](other: JavaPairRDD[K, W]): JavaPairRDD[K, V] = {
     implicit val ctag: ClassTag[W] = fakeClassTag
@@ -615,8 +614,7 @@ class JavaPairRDD[K, V](val rdd: RDD[(K, V)])
   /**
    * Return the key-value pairs in this RDD to the master as a Map.
    */
-  def collectAsMap(): java.util.Map[K, V] = mapAsSerializableJavaMap(rdd.collectAsMap())
-
+  def collectAsMap(): java.util.Map[K, V] = mapAsJavaMap(rdd.collectAsMap())
 
   /**
    * Pass each value in the key-value pair RDD through a map function without changing the keys;

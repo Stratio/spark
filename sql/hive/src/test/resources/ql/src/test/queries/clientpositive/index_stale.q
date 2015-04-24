@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 -- test that stale indexes are not used
 
 CREATE TABLE temp(key STRING, val STRING) STORED AS TEXTFILE;

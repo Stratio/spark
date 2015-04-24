@@ -23,15 +23,13 @@ import org.apache.spark.storage.BlockManagerId
 
 /**
  * Low-level task scheduler interface, currently implemented exclusively by TaskSchedulerImpl.
- * This interface allows plugging in different task schedulers. Each TaskScheduler schedules tasks
+ * This interface allows plugging in different task schedulers. Each TaskScheduler schedulers tasks
  * for a single SparkContext. These schedulers get sets of tasks submitted to them from the
  * DAGScheduler for each stage, and are responsible for sending the tasks to the cluster, running
  * them, retrying if there are failures, and mitigating stragglers. They return events to the
  * DAGScheduler.
  */
 private[spark] trait TaskScheduler {
-
-  private val appId = "spark-application-" + System.currentTimeMillis
 
   def rootPool: Pool
 
@@ -41,7 +39,7 @@ private[spark] trait TaskScheduler {
 
   // Invoked after system has successfully initialized (typically in spark context).
   // Yarn uses this to bootstrap allocation of resources based on preferred locations,
-  // wait for slave registrations, etc.
+  // wait for slave registerations, etc.
   def postStartHook() { }
 
   // Disconnect from the cluster.
@@ -68,10 +66,10 @@ private[spark] trait TaskScheduler {
     blockManagerId: BlockManagerId): Boolean
 
   /**
-   * Get an application ID associated with the job.
+   * The application ID associated with the job, if any.
    *
-   * @return An application ID
+   * @return The application ID, or None if the backend does not provide an ID.
    */
-  def applicationId(): String = appId
+  def applicationId(): Option[String] = None
 
 }

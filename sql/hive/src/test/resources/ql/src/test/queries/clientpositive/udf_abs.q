@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION abs;
 DESCRIBE FUNCTION EXTENDED abs;
 
@@ -9,7 +7,7 @@ EXPLAIN SELECT
   abs(123),
   abs(-9223372036854775807),
   abs(9223372036854775807)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT
   abs(0),
@@ -17,16 +15,16 @@ SELECT
   abs(123),
   abs(-9223372036854775807),
   abs(9223372036854775807)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 EXPLAIN SELECT
   abs(0.0),
   abs(-3.14159265),
   abs(3.14159265)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT
   abs(0.0),
   abs(-3.14159265),
   abs(3.14159265)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION instr;
 DESCRIBE FUNCTION EXTENDED instr;
 
@@ -17,7 +15,7 @@ SELECT instr('abcd', 'abc'),
        instr(CAST(16.0 AS DOUBLE), '.0'),
        instr(null, 'abc'),
        instr('abcd', null)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT instr('abcd', 'abc'),
        instr('abcabc', 'ccc'),
@@ -32,4 +30,4 @@ SELECT instr('abcd', 'abc'),
        instr(CAST(16.0 AS DOUBLE), '.0'),
        instr(null, 'abc'),
        instr('abcd', null)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

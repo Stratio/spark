@@ -17,10 +17,6 @@
 
 package org.apache.spark.examples.sql.hive
 
-import com.google.common.io.{ByteStreams, Files}
-
-import java.io.File
-
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql._
 import org.apache.spark.sql.hive.HiveContext
@@ -28,30 +24,22 @@ import org.apache.spark.sql.hive.HiveContext
 object HiveFromSpark {
   case class Record(key: Int, value: String)
 
-  // Copy kv1.txt file from classpath to temporary directory
-  val kv1Stream = HiveFromSpark.getClass.getResourceAsStream("/kv1.txt")
-  val kv1File = File.createTempFile("kv1", "txt")
-  kv1File.deleteOnExit()
-  ByteStreams.copy(kv1Stream, Files.newOutputStreamSupplier(kv1File))
-
   def main(args: Array[String]) {
     val sparkConf = new SparkConf().setAppName("HiveFromSpark")
     val sc = new SparkContext(sparkConf)
 
-    // A hive context adds support for finding tables in the MetaStore and writing queries
-    // using HiveQL. Users who do not have an existing Hive deployment can still create a
-    // HiveContext. When not configured by the hive-site.xml, the context automatically
-    // creates metastore_db and warehouse in the current directory.
+    // A local hive context creates an instance of the Hive Metastore in process, storing the
+    // the warehouse data in the current directory.  This location can be overridden by
+    // specifying a second parameter to the constructor.
     val hiveContext = new HiveContext(sc)
-    import hiveContext.implicits._
-    import hiveContext.sql
+    import hiveContext._
 
     sql("CREATE TABLE IF NOT EXISTS src (key INT, value STRING)")
-    sql(s"LOAD DATA LOCAL INPATH '${kv1File.getAbsolutePath}' INTO TABLE src")
+    sql("LOAD DATA LOCAL INPATH 'src/main/resources/kv1.txt' INTO TABLE src")
 
     // Queries are expressed in HiveQL
     println("Result of 'SELECT *': ")
-    sql("SELECT * FROM src").collect().foreach(println)
+    sql("SELECT * FROM src").collect.foreach(println)
 
     // Aggregation queries are also supported.
     val count = sql("SELECT COUNT(*) FROM src").collect().head.getLong(0)
@@ -68,12 +56,10 @@ object HiveFromSpark {
 
     // You can also register RDDs as temporary tables within a HiveContext.
     val rdd = sc.parallelize((1 to 100).map(i => Record(i, s"val_$i")))
-    rdd.toDF().registerTempTable("records")
+    rdd.registerTempTable("records")
 
     // Queries can then join RDD data with data stored in Hive.
     println("Result of SELECT *:")
     sql("SELECT * FROM records r JOIN src s ON r.key = s.key").collect().foreach(println)
-
-    sc.stop()
   }
 }

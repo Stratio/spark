@@ -24,8 +24,9 @@ import org.apache.spark.deploy.master.MasterMessages._
 import org.apache.curator.framework.CuratorFramework
 import org.apache.curator.framework.recipes.leader.{LeaderLatchListener, LeaderLatch}
 
-private[spark] class ZooKeeperLeaderElectionAgent(val masterActor: LeaderElectable,
-    conf: SparkConf) extends LeaderLatchListener with LeaderElectionAgent with Logging  {
+private[spark] class ZooKeeperLeaderElectionAgent(val masterActor: ActorRef,
+    masterUrl: String, conf: SparkConf)
+  extends LeaderElectionAgent with LeaderLatchListener with Logging  {
 
   val WORKING_DIR = conf.get("spark.deploy.zookeeper.dir", "/spark") + "/leader_election"
 
@@ -33,19 +34,28 @@ private[spark] class ZooKeeperLeaderElectionAgent(val masterActor: LeaderElectab
   private var leaderLatch: LeaderLatch = _
   private var status = LeadershipStatus.NOT_LEADER
 
-  start()
+  override def preStart() {
 
-  def start() {
     logInfo("Starting ZooKeeper LeaderElection agent")
     zk = SparkCuratorUtil.newClient(conf)
     leaderLatch = new LeaderLatch(zk, WORKING_DIR)
     leaderLatch.addListener(this)
+
     leaderLatch.start()
   }
 
-  override def stop() {
+  override def preRestart(reason: scala.Throwable, message: scala.Option[scala.Any]) {
+    logError("LeaderElectionAgent failed...", reason)
+    super.preRestart(reason, message)
+  }
+
+  override def postStop() {
     leaderLatch.close()
     zk.close()
+  }
+
+  override def receive = {
+    case _ =>
   }
 
   override def isLeader() {
@@ -75,10 +85,10 @@ private[spark] class ZooKeeperLeaderElectionAgent(val masterActor: LeaderElectab
   def updateLeadershipStatus(isLeader: Boolean) {
     if (isLeader && status == LeadershipStatus.NOT_LEADER) {
       status = LeadershipStatus.LEADER
-      masterActor.electedLeader()
+      masterActor ! ElectedLeader
     } else if (!isLeader && status == LeadershipStatus.LEADER) {
       status = LeadershipStatus.NOT_LEADER
-      masterActor.revokedLeadership()
+      masterActor ! RevokedLeadership
     }
   }
 

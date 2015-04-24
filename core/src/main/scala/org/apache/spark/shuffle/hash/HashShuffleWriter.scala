@@ -56,8 +56,9 @@ private[spark] class HashShuffleWriter[K, V](
       } else {
         records
       }
+    } else if (dep.aggregator.isEmpty && dep.mapSideCombine) {
+      throw new IllegalStateException("Aggregator is empty for map-side combine")
     } else {
-      require(!dep.mapSideCombine, "Map-side combine without Aggregator specified!")
       records
     }
 
@@ -102,11 +103,13 @@ private[spark] class HashShuffleWriter[K, V](
 
   private def commitWritesAndBuildStatus(): MapStatus = {
     // Commit the writes. Get the size of each bucket block (total block size).
-    val sizes: Array[Long] = shuffle.writers.map { writer: BlockObjectWriter =>
+    val compressedSizes = shuffle.writers.map { writer: BlockObjectWriter =>
       writer.commitAndClose()
-      writer.fileSegment().length
+      val size = writer.fileSegment().length
+      MapOutputTracker.compressSize(size)
     }
-    MapStatus(blockManager.shuffleServerId, sizes)
+
+    new MapStatus(blockManager.blockManagerId, compressedSizes)
   }
 
   private def revertWrites(): Unit = {

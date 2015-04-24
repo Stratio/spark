@@ -17,7 +17,7 @@
 
 package org.apache.spark.partial
 
-import org.apache.commons.math3.distribution.NormalDistribution
+import cern.jet.stat.Probability
 
 /**
  * An ApproximateEvaluator for counts.
@@ -46,8 +46,7 @@ private[spark] class CountEvaluator(totalOutputs: Int, confidence: Double)
       val mean = (sum + 1 - p) / p
       val variance = (sum + 1) * (1 - p) / (p * p)
       val stdev = math.sqrt(variance)
-      val confFactor = new NormalDistribution().
-        inverseCumulativeProbability(1 - (1 - confidence) / 2)
+      val confFactor = Probability.normalInverse(1 - (1 - confidence) / 2)
       val low = mean - confFactor * stdev
       val high = mean + confFactor * stdev
       new BoundedDouble(mean, confidence, low, high)

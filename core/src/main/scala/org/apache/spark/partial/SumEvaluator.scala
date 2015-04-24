@@ -17,7 +17,7 @@
 
 package org.apache.spark.partial
 
-import org.apache.commons.math3.distribution.{TDistribution, NormalDistribution}
+import cern.jet.stat.Probability
 
 import org.apache.spark.util.StatCounter
 
@@ -55,10 +55,9 @@ private[spark] class SumEvaluator(totalOutputs: Int, confidence: Double)
       val sumStdev = math.sqrt(sumVar)
       val confFactor = {
         if (counter.count > 100) {
-          new NormalDistribution().inverseCumulativeProbability(1 - (1 - confidence) / 2)
+          Probability.normalInverse(1 - (1 - confidence) / 2)
         } else {
-          val degreesOfFreedom = (counter.count - 1).toInt
-          new TDistribution(degreesOfFreedom).inverseCumulativeProbability(1 - (1 - confidence) / 2)
+          Probability.studentTInverse(1 - confidence, (counter.count - 1).toInt)
         }
       }
       val low = sumEstimate - confFactor * sumStdev

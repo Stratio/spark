@@ -17,19 +17,20 @@
 
 package org.apache.spark.deploy
 
-import java.net.URI
+import java.io.{File, FileInputStream, IOException}
+import java.util.Properties
 import java.util.jar.JarFile
 
+import scala.collection.JavaConversions._
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
-import org.apache.spark.deploy.SparkSubmitAction._
+import org.apache.spark.SparkException
 import org.apache.spark.util.Utils
 
 /**
  * Parses and encapsulates arguments from the spark-submit script.
- * The env argument is used for testing.
  */
-private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, String] = sys.env) {
+private[spark] class SparkSubmitArguments(args: Seq[String]) {
   var master: String = null
   var deployMode: String = null
   var executorMemory: String = null
@@ -40,6 +41,8 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
   var driverExtraClassPath: String = null
   var driverExtraLibraryPath: String = null
   var driverExtraJavaOptions: String = null
+  var driverCores: String = null
+  var supervise: Boolean = false
   var queue: String = null
   var numExecutors: String = null
   var files: String = null
@@ -49,30 +52,19 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
   var name: String = null
   var childArgs: ArrayBuffer[String] = new ArrayBuffer[String]()
   var jars: String = null
-  var packages: String = null
-  var repositories: String = null
-  var ivyRepoPath: String = null
   var verbose: Boolean = false
   var isPython: Boolean = false
   var pyFiles: String = null
-  var action: SparkSubmitAction = null
   val sparkProperties: HashMap[String, String] = new HashMap[String, String]()
-  var proxyUser: String = null
-
-  // Standalone cluster mode only
-  var supervise: Boolean = false
-  var driverCores: String = null
-  var submissionToKill: String = null
-  var submissionToRequestStatusFor: String = null
-  var useRest: Boolean = true // used internally
 
   /** Default properties present in the currently defined defaults file. */
   lazy val defaultSparkProperties: HashMap[String, String] = {
     val defaultProperties = new HashMap[String, String]()
     if (verbose) SparkSubmit.printStream.println(s"Using properties file: $propertiesFile")
     Option(propertiesFile).foreach { filename =>
-      Utils.getPropertiesFromFile(filename).foreach { case (k, v) =>
-        if (k.startsWith("spark.")) {
+      val file = new File(filename)
+      SparkSubmitArguments.getPropertiesFromFile(file).foreach { case (k, v) =>
+        if (k.startsWith("spark")) {
           defaultProperties(k) = v
           if (verbose) SparkSubmit.printStream.println(s"Adding default property: $k=$v")
         } else {
@@ -83,121 +75,87 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
     defaultProperties
   }
 
-  // Set parameters from command line arguments
-  parseOpts(args.toList)
-  // Populate `sparkProperties` map from properties file
-  mergeDefaultSparkProperties()
-  // Use `sparkProperties` map along with env vars to fill in any missing parameters
-  loadEnvironmentArguments()
+  // Respect SPARK_*_MEMORY for cluster mode
+  driverMemory = sys.env.get("SPARK_DRIVER_MEMORY").orNull
+  executorMemory = sys.env.get("SPARK_EXECUTOR_MEMORY").orNull
 
-  validateArguments()
+  parseOpts(args.toList)
+  mergeSparkProperties()
+  checkRequiredArguments()
 
   /**
-   * Merge values from the default properties file with those specified through --conf.
-   * When this is called, `sparkProperties` is already filled with configs from the latter.
+   * Fill in any undefined values based on the default properties file or options passed in through
+   * the '--conf' flag.
    */
-  private def mergeDefaultSparkProperties(): Unit = {
+  private def mergeSparkProperties(): Unit = {
     // Use common defaults file, if not specified by user
-    propertiesFile = Option(propertiesFile).getOrElse(Utils.getDefaultPropertiesFile(env))
-    // Honor --conf before the defaults file
-    defaultSparkProperties.foreach { case (k, v) =>
-      if (!sparkProperties.contains(k)) {
-        sparkProperties(k) = v
+    if (propertiesFile == null) {
+      sys.env.get("SPARK_CONF_DIR").foreach { sparkConfDir =>
+        val sep = File.separator
+        val defaultPath = s"${sparkConfDir}${sep}spark-defaults.conf"
+        val file = new File(defaultPath)
+        if (file.exists()) {
+          propertiesFile = file.getAbsolutePath
+        }
       }
     }
-  }
 
-  /**
-   * Load arguments from environment variables, Spark properties etc.
-   */
-  private def loadEnvironmentArguments(): Unit = {
-    master = Option(master)
-      .orElse(sparkProperties.get("spark.master"))
-      .orElse(env.get("MASTER"))
-      .orNull
-    driverExtraClassPath = Option(driverExtraClassPath)
-      .orElse(sparkProperties.get("spark.driver.extraClassPath"))
-      .orNull
-    driverExtraJavaOptions = Option(driverExtraJavaOptions)
-      .orElse(sparkProperties.get("spark.driver.extraJavaOptions"))
-      .orNull
-    driverExtraLibraryPath = Option(driverExtraLibraryPath)
-      .orElse(sparkProperties.get("spark.driver.extraLibraryPath"))
-      .orNull
-    driverMemory = Option(driverMemory)
-      .orElse(sparkProperties.get("spark.driver.memory"))
-      .orElse(env.get("SPARK_DRIVER_MEMORY"))
-      .orNull
-    driverCores = Option(driverCores)
-      .orElse(sparkProperties.get("spark.driver.cores"))
-      .orNull
+    if (propertiesFile == null) {
+      sys.env.get("SPARK_HOME").foreach { sparkHome =>
+        val sep = File.separator
+        val defaultPath = s"${sparkHome}${sep}conf${sep}spark-defaults.conf"
+        val file = new File(defaultPath)
+        if (file.exists()) {
+          propertiesFile = file.getAbsolutePath
+        }
+      }
+    }
+
+    val properties = HashMap[String, String]()
+    properties.putAll(defaultSparkProperties)
+    properties.putAll(sparkProperties)
+
+    // Use properties file as fallback for values which have a direct analog to
+    // arguments in this script.
+    master = Option(master).getOrElse(properties.get("spark.master").orNull)
     executorMemory = Option(executorMemory)
-      .orElse(sparkProperties.get("spark.executor.memory"))
-      .orElse(env.get("SPARK_EXECUTOR_MEMORY"))
-      .orNull
+      .getOrElse(properties.get("spark.executor.memory").orNull)
     executorCores = Option(executorCores)
-      .orElse(sparkProperties.get("spark.executor.cores"))
-      .orNull
+      .getOrElse(properties.get("spark.executor.cores").orNull)
     totalExecutorCores = Option(totalExecutorCores)
-      .orElse(sparkProperties.get("spark.cores.max"))
-      .orNull
-    name = Option(name).orElse(sparkProperties.get("spark.app.name")).orNull
-    jars = Option(jars).orElse(sparkProperties.get("spark.jars")).orNull
-    ivyRepoPath = sparkProperties.get("spark.jars.ivy").orNull
-    deployMode = Option(deployMode).orElse(env.get("DEPLOY_MODE")).orNull
-    numExecutors = Option(numExecutors)
-      .getOrElse(sparkProperties.get("spark.executor.instances").orNull)
+      .getOrElse(properties.get("spark.cores.max").orNull)
+    name = Option(name).getOrElse(properties.get("spark.app.name").orNull)
+    jars = Option(jars).getOrElse(properties.get("spark.jars").orNull)
+
+    // This supports env vars in older versions of Spark
+    master = Option(master).getOrElse(System.getenv("MASTER"))
+    deployMode = Option(deployMode).getOrElse(System.getenv("DEPLOY_MODE"))
 
     // Try to set main class from JAR if no --class argument is given
     if (mainClass == null && !isPython && primaryResource != null) {
-      val uri = new URI(primaryResource)
-      val uriScheme = uri.getScheme()
-
-      uriScheme match {
-        case "file" =>
-          try {
-            val jar = new JarFile(uri.getPath)
-            // Note that this might still return null if no main-class is set; we catch that later
-            mainClass = jar.getManifest.getMainAttributes.getValue("Main-Class")
-          } catch {
-            case e: Exception =>
-              SparkSubmit.printErrorAndExit(s"Cannot load main class from JAR $primaryResource")
-          }
-        case _ =>
-          SparkSubmit.printErrorAndExit(
-            s"Cannot load main class from JAR $primaryResource with URI $uriScheme. " +
-            "Please specify a class through --class.")
+      try {
+        val jar = new JarFile(primaryResource)
+        // Note that this might still return null if no main-class is set; we catch that later
+        mainClass = jar.getManifest.getMainAttributes.getValue("Main-Class")
+      } catch {
+        case e: Exception =>
+          SparkSubmit.printErrorAndExit("Cannot load main class from JAR: " + primaryResource)
+          return
       }
     }
 
     // Global defaults. These should be keep to minimum to avoid confusing behavior.
     master = Option(master).getOrElse("local[*]")
 
-    // In YARN mode, app name can be set via SPARK_YARN_APP_NAME (see SPARK-5222)
-    if (master.startsWith("yarn")) {
-      name = Option(name).orElse(env.get("SPARK_YARN_APP_NAME")).orNull
-    }
-
     // Set name from main class if not given
     name = Option(name).orElse(Option(mainClass)).orNull
     if (name == null && primaryResource != null) {
       name = Utils.stripDirectory(primaryResource)
     }
-
-    // Action should be SUBMIT unless otherwise specified
-    action = Option(action).getOrElse(SUBMIT)
   }
 
   /** Ensure that required fields exists. Call this only once all defaults are loaded. */
-  private def validateArguments(): Unit = {
-    action match {
-      case SUBMIT => validateSubmitArguments()
-      case KILL => validateKillArguments()
-      case REQUEST_STATUS => validateStatusRequestArguments()
-    }
-  }
-
-  private def validateSubmitArguments(): Unit = {
+  private def checkRequiredArguments() = {
     if (args.length == 0) {
       printUsageAndExit(-1)
     }
@@ -211,8 +169,20 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
       SparkSubmit.printErrorAndExit("--py-files given but primary resource is not a Python script")
     }
 
+    // Require all python files to be local, so we can add them to the PYTHONPATH
+    if (isPython) {
+      if (Utils.nonLocalPaths(primaryResource).nonEmpty) {
+        SparkSubmit.printErrorAndExit(s"Only local python files are supported: $primaryResource")
+      }
+      val nonLocalPyFiles = Utils.nonLocalPaths(pyFiles).mkString(",")
+      if (nonLocalPyFiles.nonEmpty) {
+        SparkSubmit.printErrorAndExit(
+          s"Only local additional python files are supported: $nonLocalPyFiles")
+      }
+    }
+
     if (master.startsWith("yarn")) {
-      val hasHadoopEnv = env.contains("HADOOP_CONF_DIR") || env.contains("YARN_CONF_DIR")
+      val hasHadoopEnv = sys.env.contains("HADOOP_CONF_DIR") || sys.env.contains("YARN_CONF_DIR")
       if (!hasHadoopEnv && !Utils.isTesting) {
         throw new Exception(s"When running with master '$master' " +
           "either HADOOP_CONF_DIR or YARN_CONF_DIR must be set in the environment.")
@@ -220,30 +190,7 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
     }
   }
 
-  private def validateKillArguments(): Unit = {
-    if (!master.startsWith("spark://")) {
-      SparkSubmit.printErrorAndExit("Killing submissions is only supported in standalone mode!")
-    }
-    if (submissionToKill == null) {
-      SparkSubmit.printErrorAndExit("Please specify a submission to kill.")
-    }
-  }
-
-  private def validateStatusRequestArguments(): Unit = {
-    if (!master.startsWith("spark://")) {
-      SparkSubmit.printErrorAndExit(
-        "Requesting submission statuses is only supported in standalone mode!")
-    }
-    if (submissionToRequestStatusFor == null) {
-      SparkSubmit.printErrorAndExit("Please specify a submission to request status for.")
-    }
-  }
-
-  def isStandaloneCluster: Boolean = {
-    master.startsWith("spark://") && deployMode == "cluster"
-  }
-
-  override def toString = {
+  override def toString =  {
     s"""Parsed arguments:
     |  master                  $master
     |  deployMode              $deployMode
@@ -251,6 +198,7 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
     |  executorCores           $executorCores
     |  totalExecutorCores      $totalExecutorCores
     |  propertiesFile          $propertiesFile
+    |  extraSparkProperties    $sparkProperties
     |  driverMemory            $driverMemory
     |  driverCores             $driverCores
     |  driverExtraClassPath    $driverExtraClassPath
@@ -267,20 +215,14 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
     |  name                    $name
     |  childArgs               [${childArgs.mkString(" ")}]
     |  jars                    $jars
-    |  packages                $packages
-    |  repositories            $repositories
     |  verbose                 $verbose
     |
-    |Spark properties used, including those specified through
-    | --conf and those from the properties file $propertiesFile:
-    |${sparkProperties.mkString("  ", "\n  ", "\n")}
+    |Default properties from $propertiesFile:
+    |${defaultSparkProperties.mkString("  ", "\n  ", "\n")}
     """.stripMargin
   }
 
-  /**
-   * Fill in values by parsing user options.
-   * NOTE: Any changes here must be reflected in YarnClientSchedulerBackend.
-   */
+  /** Fill in values by parsing user options. */
   private def parseOpts(opts: Seq[String]): Unit = {
     val EQ_SEPARATED_OPT="""(--[^=]+)=(.+)""".r
 
@@ -351,22 +293,6 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
         propertiesFile = value
         parse(tail)
 
-      case ("--kill") :: value :: tail =>
-        submissionToKill = value
-        if (action != null) {
-          SparkSubmit.printErrorAndExit(s"Action cannot be both $action and $KILL.")
-        }
-        action = KILL
-        parse(tail)
-
-      case ("--status") :: value :: tail =>
-        submissionToRequestStatusFor = value
-        if (action != null) {
-          SparkSubmit.printErrorAndExit(s"Action cannot be both $action and $REQUEST_STATUS.")
-        }
-        action = REQUEST_STATUS
-        parse(tail)
-
       case ("--supervise") :: tail =>
         supervise = true
         parse(tail)
@@ -391,23 +317,11 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
         jars = Utils.resolveURIs(value)
         parse(tail)
 
-      case ("--packages") :: value :: tail =>
-        packages = value
-        parse(tail)
-
-      case ("--repositories") :: value :: tail =>
-        repositories = value
-        parse(tail)
-
       case ("--conf" | "-c") :: value :: tail =>
         value.split("=", 2).toSeq match {
           case Seq(k, v) => sparkProperties(k) = v
           case _ => SparkSubmit.printErrorAndExit(s"Spark config without '=': $value")
         }
-        parse(tail)
-
-      case ("--proxy-user") :: value :: tail =>
-        proxyUser = value
         parse(tail)
 
       case ("--help" | "-h") :: tail =>
@@ -416,9 +330,6 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
       case ("--verbose" | "-v") :: tail =>
         verbose = true
         parse(tail)
-
-      case ("--version") :: tail =>
-        SparkSubmit.printVersionAndExit()
 
       case EQ_SEPARATED_OPT(opt, value) :: tail =>
         parse(opt :: value :: tail)
@@ -440,16 +351,13 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
     }
   }
 
-  private def printUsageAndExit(exitCode: Int, unknownParam: Any = null): Unit = {
+  private def printUsageAndExit(exitCode: Int, unknownParam: Any = null) {
     val outStream = SparkSubmit.printStream
     if (unknownParam != null) {
       outStream.println("Unknown/unsupported param " + unknownParam)
     }
     outStream.println(
-      """Usage: spark-submit [options] <app jar | python file> [app arguments]
-        |Usage: spark-submit --kill [submission ID] --master [spark://...]
-        |Usage: spark-submit --status [submission ID] --master [spark://...]
-        |
+      """Usage: spark-submit [options] <app jar | python file> [app options]
         |Options:
         |  --master MASTER_URL         spark://host:port, mesos://host:port, yarn, or local.
         |  --deploy-mode DEPLOY_MODE   Whether to launch the driver program locally ("client") or
@@ -459,13 +367,6 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
         |  --name NAME                 A name of your application.
         |  --jars JARS                 Comma-separated list of local jars to include on the driver
         |                              and executor classpaths.
-        |  --packages                  Comma-separated list of maven coordinates of jars to include
-        |                              on the driver and executor classpaths. Will search the local
-        |                              maven repo, then maven central and any additional remote
-        |                              repositories given by --repositories. The format for the
-        |                              coordinates should be groupId:artifactId:version.
-        |  --repositories              Comma-separated list of additional remote repositories to
-        |                              search for the maven coordinates given with --packages.
         |  --py-files PY_FILES         Comma-separated list of .zip, .egg, or .py files to place
         |                              on the PYTHONPATH for Python apps.
         |  --files FILES               Comma-separated list of files to be placed in the working
@@ -484,31 +385,43 @@ private[spark] class SparkSubmitArguments(args: Seq[String], env: Map[String, St
         |
         |  --executor-memory MEM       Memory per executor (e.g. 1000M, 2G) (Default: 1G).
         |
-        |  --proxy-user NAME           User to impersonate when submitting the application.
-        |
         |  --help, -h                  Show this help message and exit
         |  --verbose, -v               Print additional debug output
-        |  --version,                  Print the version of current Spark
         |
         | Spark standalone with cluster deploy mode only:
         |  --driver-cores NUM          Cores for driver (Default: 1).
         |  --supervise                 If given, restarts the driver on failure.
-        |  --kill SUBMISSION_ID        If given, kills the driver specified.
-        |  --status SUBMISSION_ID      If given, requests the status of the driver specified.
         |
         | Spark standalone and Mesos only:
         |  --total-executor-cores NUM  Total cores for all executors.
         |
         | YARN-only:
-        |  --driver-cores NUM          Number of cores used by the driver, only in cluster mode
-        |                              (Default: 1).
         |  --executor-cores NUM        Number of cores per executor (Default: 1).
         |  --queue QUEUE_NAME          The YARN queue to submit to (Default: "default").
         |  --num-executors NUM         Number of executors to launch (Default: 2).
         |  --archives ARCHIVES         Comma separated list of archives to be extracted into the
-        |                              working directory of each executor.
-      """.stripMargin
+        |                              working directory of each executor.""".stripMargin
     )
     SparkSubmit.exitFn()
+  }
+}
+
+object SparkSubmitArguments {
+  /** Load properties present in the given file. */
+  def getPropertiesFromFile(file: File): Seq[(String, String)] = {
+    require(file.exists(), s"Properties file $file does not exist")
+    require(file.isFile(), s"Properties file $file is not a normal file")
+    val inputStream = new FileInputStream(file)
+    try {
+      val properties = new Properties()
+      properties.load(inputStream)
+      properties.stringPropertyNames().toSeq.map(k => (k, properties(k).trim))
+    } catch {
+      case e: IOException =>
+        val message = s"Failed when loading Spark properties file $file"
+        throw new SparkException(message, e)
+    } finally {
+      inputStream.close()
+    }
   }
 }

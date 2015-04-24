@@ -22,7 +22,6 @@ import scala.collection.JavaConversions._
 import java.util.concurrent.{TimeUnit, ConcurrentHashMap, Executors}
 import akka.actor.{ActorRef, Actor, Props}
 import org.apache.spark.{SparkException, Logging, SparkEnv}
-import org.apache.spark.rdd.PairRDDFunctions
 import org.apache.spark.streaming._
 
 
@@ -73,7 +72,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     logDebug("Stopping JobScheduler")
 
     // First, stop receiving
-    receiverTracker.stop(processAllReceivedData)
+    receiverTracker.stop()
 
     // Second, stop generating jobs. If it has to process all received data,
     // then this will wait for all the processing through JobScheduler to be over.
@@ -105,7 +104,6 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     if (jobSet.jobs.isEmpty) {
       logInfo("No jobs added for time " + jobSet.time)
     } else {
-      listenerBus.post(StreamingListenerBatchSubmitted(jobSet.toBatchInfo))
       jobSets.put(jobSet.time, jobSet)
       jobSet.jobs.foreach(job => jobExecutor.execute(new JobHandler(job)))
       logInfo("Added jobs for time " + jobSet.time)
@@ -135,14 +133,12 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
 
   private def handleJobStart(job: Job) {
     val jobSet = jobSets.get(job.time)
-    val isFirstJobOfJobSet = !jobSet.hasStarted
-    jobSet.handleJobStart(job)
-    if (isFirstJobOfJobSet) {
-      // "StreamingListenerBatchStarted" should be posted after calling "handleJobStart" to get the
-      // correct "jobSet.processingStartTime".
+    if (!jobSet.hasStarted) {
       listenerBus.post(StreamingListenerBatchStarted(jobSet.toBatchInfo))
     }
+    jobSet.handleJobStart(job)
     logInfo("Starting job " + job.id + " from job set of time " + jobSet.time)
+    SparkEnv.set(ssc.env)
   }
 
   private def handleJobCompletion(job: Job) {
@@ -173,12 +169,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
   private class JobHandler(job: Job) extends Runnable {
     def run() {
       eventActor ! JobStarted(job)
-      // Disable checks for existing output directories in jobs launched by the streaming scheduler,
-      // since we may need to write output to an existing directory during checkpoint recovery;
-      // see SPARK-4835 for more details.
-      PairRDDFunctions.disableOutputSpecValidation.withValue(true) {
-        job.run()
-      }
+      job.run()
       eventActor ! JobCompleted(job)
     }
   }

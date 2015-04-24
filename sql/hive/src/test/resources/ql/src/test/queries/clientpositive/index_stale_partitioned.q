@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 -- Test if index is actually being used.
 
 -- Create temp, and populate it with some values in src.

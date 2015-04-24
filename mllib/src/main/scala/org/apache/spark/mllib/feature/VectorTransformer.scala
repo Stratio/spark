@@ -18,7 +18,6 @@
 package org.apache.spark.mllib.feature
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.rdd.RDD
 
@@ -47,16 +46,6 @@ trait VectorTransformer extends Serializable {
     // Later in #1498 , all RDD objects are sent via broadcasting instead of akka.
     // So it should be no longer necessary to explicitly broadcast `this` object.
     data.map(x => this.transform(x))
-  }
-
-  /**
-   * Applies transformation on an JavaRDD[Vector].
-   *
-   * @param data JavaRDD[Vector] to be transformed.
-   * @return transformed JavaRDD[Vector].
-   */
-  def transform(data: JavaRDD[Vector]): JavaRDD[Vector] = {
-    transform(data.rdd)
   }
 
 }

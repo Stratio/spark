@@ -44,18 +44,9 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
     blockManager.get(key) match {
       case Some(blockResult) =>
         // Partition is already materialized, so just return its values
-        val inputMetrics = blockResult.inputMetrics
-        val existingMetrics = context.taskMetrics
-          .getInputMetricsForReadMethod(inputMetrics.readMethod)
-        existingMetrics.incBytesRead(inputMetrics.bytesRead)
+        context.taskMetrics.inputMetrics = Some(blockResult.inputMetrics)
+        new InterruptibleIterator(context, blockResult.data.asInstanceOf[Iterator[T]])
 
-        val iter = blockResult.data.asInstanceOf[Iterator[T]]
-        new InterruptibleIterator[T](context, iter) {
-          override def next(): T = {
-            existingMetrics.incRecordsRead(1)
-            delegate.next()
-          }
-        }
       case None =>
         // Acquire a lock for loading this partition
         // If another thread already holds the lock, wait for it to finish return its results
@@ -70,7 +61,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
           val computedValues = rdd.computeOrReadCheckpoint(partition, context)
 
           // If the task is running locally, do not persist the result
-          if (context.isRunningLocally) {
+          if (context.runningLocally) {
             return computedValues
           }
 
@@ -177,6 +168,8 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
           arr.iterator.asInstanceOf[Iterator[T]]
         case Right(it) =>
           // There is not enough space to cache this partition in memory
+          logWarning(s"Not enough space to cache partition $key in memory! " +
+            s"Free memory is ${blockManager.memoryStore.freeMemory} bytes.")
           val returnValues = it.asInstanceOf[Iterator[T]]
           if (putLevel.useDisk) {
             logWarning(s"Persisting partition $key to disk instead.")

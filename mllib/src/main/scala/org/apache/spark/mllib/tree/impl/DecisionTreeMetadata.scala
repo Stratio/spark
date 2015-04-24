@@ -19,7 +19,6 @@ package org.apache.spark.mllib.tree.impl
 
 import scala.collection.mutable
 
-import org.apache.spark.Logging
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.tree.configuration.Algo._
 import org.apache.spark.mllib.tree.configuration.QuantileStrategy._
@@ -76,17 +75,6 @@ private[tree] class DecisionTreeMetadata(
     numBins(featureIndex) - 1
   }
 
-
-  /**
-   * Set number of splits for a continuous feature.
-   * For a continuous feature, number of bins is number of splits plus 1.
-   */
-  def setNumSplits(featureIndex: Int, numSplits: Int) {
-    require(isContinuous(featureIndex),
-      s"Only number of bin for a continuous feature can be set.")
-    numBins(featureIndex) = numSplits + 1
-  }
-
   /**
    * Indicates if feature subsampling is being used.
    */
@@ -94,7 +82,7 @@ private[tree] class DecisionTreeMetadata(
 
 }
 
-private[tree] object DecisionTreeMetadata extends Logging {
+private[tree] object DecisionTreeMetadata {
 
   /**
    * Construct a [[DecisionTreeMetadata]] instance for this dataset and parameters.
@@ -110,15 +98,11 @@ private[tree] object DecisionTreeMetadata extends Logging {
     val numFeatures = input.take(1)(0).features.size
     val numExamples = input.count()
     val numClasses = strategy.algo match {
-      case Classification => strategy.numClasses
+      case Classification => strategy.numClassesForClassification
       case Regression => 0
     }
 
     val maxPossibleBins = math.min(strategy.maxBins, numExamples).toInt
-    if (maxPossibleBins < strategy.maxBins) {
-      logWarning(s"DecisionTree reducing maxBins from ${strategy.maxBins} to $maxPossibleBins" +
-        s" (= number of training instances)")
-    }
 
     // We check the number of bins here against maxPossibleBins.
     // This needs to be checked here instead of in Strategy since maxPossibleBins can be modified
@@ -183,7 +167,7 @@ private[tree] object DecisionTreeMetadata extends Logging {
   }
 
   /**
-   * Version of [[DecisionTreeMetadata#buildMetadata]] for DecisionTree.
+   * Version of [[buildMetadata()]] for DecisionTree.
    */
   def buildMetadata(
       input: RDD[LabeledPoint],

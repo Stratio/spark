@@ -66,7 +66,7 @@ class SparkFlumeEvent() extends Externalizable {
   var event : AvroFlumeEvent = new AvroFlumeEvent()
 
   /* De-serialize from bytes. */
-  def readExternal(in: ObjectInput): Unit = Utils.tryOrIOException {
+  def readExternal(in: ObjectInput) {
     val bodyLength = in.readInt()
     val bodyBuff = new Array[Byte](bodyLength)
     in.readFully(bodyBuff)
@@ -93,7 +93,7 @@ class SparkFlumeEvent() extends Externalizable {
   }
 
   /* Serialize to bytes. */
-  def writeExternal(out: ObjectOutput): Unit = Utils.tryOrIOException {
+  def writeExternal(out: ObjectOutput) {
     val body = event.getBody.array()
     out.writeInt(body.length)
     out.write(body)

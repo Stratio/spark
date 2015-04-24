@@ -20,6 +20,9 @@ package org.apache.spark.streaming.flume
 
 import java.net.InetSocketAddress
 import java.util.concurrent.{Callable, ExecutorCompletionService, Executors}
+import java.util.Random
+
+import org.apache.spark.TestUtils
 
 import scala.collection.JavaConversions._
 import scala.collection.mutable.{SynchronizedBuffer, ArrayBuffer}
@@ -29,34 +32,20 @@ import org.apache.flume.channel.MemoryChannel
 import org.apache.flume.conf.Configurables
 import org.apache.flume.event.EventBuilder
 
-import org.scalatest.{BeforeAndAfter, FunSuite}
-
-import org.apache.spark.{SparkConf, Logging}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.dstream.ReceiverInputDStream
-import org.apache.spark.streaming.{Seconds, TestOutputStream, StreamingContext}
+import org.apache.spark.streaming.util.ManualClock
+import org.apache.spark.streaming.{TestSuiteBase, TestOutputStream, StreamingContext}
 import org.apache.spark.streaming.flume.sink._
-import org.apache.spark.util.{ManualClock, Utils}
+import org.apache.spark.util.Utils
 
-class FlumePollingStreamSuite extends FunSuite with BeforeAndAfter with Logging {
+class FlumePollingStreamSuite extends TestSuiteBase {
 
   val batchCount = 5
   val eventsPerBatch = 100
   val totalEventsPerChannel = batchCount * eventsPerBatch
   val channelCapacity = 5000
   val maxAttempts = 5
-  val batchDuration = Seconds(1)
-
-  val conf = new SparkConf()
-    .setMaster("local[2]")
-    .setAppName(this.getClass.getSimpleName)
-
-  def beforeFunction() {
-    logInfo("Using manual clock")
-    conf.set("spark.streaming.clock", "org.apache.spark.util.ManualClock")
-  }
-
-  before(beforeFunction())
 
   test("flume polling test") {
     testMultipleTimes(testFlumePolling)
@@ -156,16 +145,11 @@ class FlumePollingStreamSuite extends FunSuite with BeforeAndAfter with Logging 
     outputStream.register()
 
     ssc.start()
-    try {
-      writeAndVerify(Seq(channel, channel2), ssc, outputBuffer)
-      assertChannelIsEmpty(channel)
-      assertChannelIsEmpty(channel2)
-    } finally {
-      sink.stop()
-      sink2.stop()
-      channel.stop()
-      channel2.stop()
-    }
+    writeAndVerify(Seq(channel, channel2), ssc, outputBuffer)
+    assertChannelIsEmpty(channel)
+    assertChannelIsEmpty(channel2)
+    sink.stop()
+    channel.stop()
   }
 
   def writeAndVerify(channels: Seq[MemoryChannel], ssc: StreamingContext,
@@ -235,10 +219,9 @@ class FlumePollingStreamSuite extends FunSuite with BeforeAndAfter with Logging 
         tx.commit()
         tx.close()
         Thread.sleep(500) // Allow some time for the events to reach
-        clock.advance(batchDuration.milliseconds)
+        clock.addToTime(batchDuration.milliseconds)
       }
       null
     }
   }
-
 }

@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 DROP TABLE show_idx_empty;
 DROP TABLE show_idx_full;
 

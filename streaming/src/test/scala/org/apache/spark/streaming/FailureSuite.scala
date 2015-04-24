@@ -28,16 +28,21 @@ import java.io.File
  */
 class FailureSuite extends TestSuiteBase with Logging {
 
-  val directory = Utils.createTempDir().getAbsolutePath
+  var directory = "FailureSuite"
   val numBatches = 30
 
   override def batchDuration = Milliseconds(1000)
 
   override def useManualClock = false
 
-  override def afterFunction() {
+  override def beforeFunction() {
+    super.beforeFunction()
     Utils.deleteRecursively(new File(directory))
+  }
+
+  override def afterFunction() {
     super.afterFunction()
+    Utils.deleteRecursively(new File(directory))
   }
 
   test("multiple failures with map") {

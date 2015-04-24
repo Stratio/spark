@@ -17,42 +17,33 @@
 
 package org.apache.spark.sql.json
 
-import java.sql.Timestamp
-
 import scala.collection.Map
 import scala.collection.convert.Wrappers.{JMapWrapper, JListWrapper}
+import scala.math.BigDecimal
 
-import com.fasterxml.jackson.core.{JsonGenerator, JsonProcessingException}
 import com.fasterxml.jackson.databind.ObjectMapper
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.analysis.HiveTypeCoercion
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
-import org.apache.spark.sql.types._
 import org.apache.spark.Logging
 
 private[sql] object JsonRDD extends Logging {
 
   private[sql] def jsonStringToRow(
       json: RDD[String],
-      schema: StructType,
-      columnNameOfCorruptRecords: String): RDD[Row] = {
-    parseJson(json, columnNameOfCorruptRecords).map(parsed => asRow(parsed, schema))
+      schema: StructType): RDD[Row] = {
+    parseJson(json).map(parsed => asRow(parsed, schema))
   }
 
   private[sql] def inferSchema(
       json: RDD[String],
-      samplingRatio: Double = 1.0,
-      columnNameOfCorruptRecords: String): StructType = {
+      samplingRatio: Double = 1.0): StructType = {
     require(samplingRatio > 0, s"samplingRatio ($samplingRatio) should be greater than 0")
     val schemaData = if (samplingRatio > 0.99) json else json.sample(false, samplingRatio, 1)
-    val allKeys =
-      if (schemaData.isEmpty()) {
-        Set.empty[(String, DataType)]
-      } else {
-        parseJson(schemaData, columnNameOfCorruptRecords).map(allKeysWithValueTypes).reduce(_ ++ _)
-      }
+    val allKeys = parseJson(schemaData).map(allKeysWithValueTypes).reduce(_ ++ _)
     createSchema(allKeys)
   }
 
@@ -75,18 +66,16 @@ private[sql] object JsonRDD extends Logging {
 
     def makeStruct(values: Seq[Seq[String]], prefix: Seq[String]): StructType = {
       val (topLevel, structLike) = values.partition(_.size == 1)
-
       val topLevelFields = topLevel.filter {
         name => resolved.get(prefix ++ name).get match {
           case ArrayType(elementType, _) => {
             def hasInnerStruct(t: DataType): Boolean = t match {
-              case s: StructType => true
+              case s: StructType => false
               case ArrayType(t1, _) => hasInnerStruct(t1)
-              case o => false
+              case o => true
             }
 
-            // Check if this array has inner struct.
-            !hasInnerStruct(elementType)
+            hasInnerStruct(elementType)
           }
           case struct: StructType => false
           case _ => true
@@ -94,11 +83,8 @@ private[sql] object JsonRDD extends Logging {
       }.map {
         a => StructField(a.head, resolved.get(prefix ++ a).get, nullable = true)
       }
-      val topLevelFieldNameSet = topLevelFields.map(_.name)
 
-      val structFields: Seq[StructField] = structLike.groupBy(_(0)).filter {
-        case (name, _) => !topLevelFieldNameSet.contains(name)
-      }.map {
+      val structFields: Seq[StructField] = structLike.groupBy(_(0)).map {
         case (name, fields) => {
           val nestedFields = fields.map(_.tail)
           val structType = makeStruct(nestedFields, prefix :+ name)
@@ -126,7 +112,10 @@ private[sql] object JsonRDD extends Logging {
         }
       }.flatMap(field => field).toSeq
 
-      StructType((topLevelFields ++ structFields).sortBy(_.name))
+      StructType(
+        (topLevelFields ++ structFields).sortBy {
+        case StructField(name, _, _) => name
+      })
     }
 
     makeStruct(resolved.keySet.toSeq, Nil)
@@ -134,7 +123,7 @@ private[sql] object JsonRDD extends Logging {
 
   private[sql] def nullTypeToStringType(struct: StructType): StructType = {
     val fields = struct.fields.map {
-      case StructField(fieldName, dataType, nullable, _) => {
+      case StructField(fieldName, dataType, nullable) => {
         val newType = dataType match {
           case NullType => StringType
           case ArrayType(NullType, containsNull) => ArrayType(StringType, containsNull)
@@ -169,7 +158,9 @@ private[sql] object JsonRDD extends Logging {
                 StructField(name, dataType, true)
               }
             }
-            StructType(newFields.toSeq.sortBy(_.name))
+            StructType(newFields.toSeq.sortBy {
+              case StructField(name, _, _) => name
+            })
           }
           case (ArrayType(elementType1, containsNull1), ArrayType(elementType2, containsNull2)) =>
             ArrayType(compatibleType(elementType1, elementType2), containsNull1 || containsNull2)
@@ -181,17 +172,12 @@ private[sql] object JsonRDD extends Logging {
   }
 
   private def typeOfPrimitiveValue: PartialFunction[Any, DataType] = {
-    // For Integer values, use LongType by default.
-    val useLongType: PartialFunction[Any, DataType] = {
-      case value: IntegerType.JvmType => LongType
-    }
-
-    useLongType orElse ScalaReflection.typeOfObject orElse {
+    ScalaReflection.typeOfObject orElse {
       // Since we do not have a data type backed by BigInteger,
       // when we see a Java BigInteger, we use DecimalType.
-      case value: java.math.BigInteger => DecimalType.Unlimited
+      case value: java.math.BigInteger => DecimalType
       // DecimalType's JVMType is scala BigDecimal.
-      case value: java.math.BigDecimal => DecimalType.Unlimited
+      case value: java.math.BigDecimal => DecimalType
       // Unexpected data type.
       case _ => StringType
     }
@@ -203,12 +189,13 @@ private[sql] object JsonRDD extends Logging {
    * type conflicts.
    */
   private def typeOfArray(l: Seq[Any]): ArrayType = {
+    val containsNull = l.exists(v => v == null)
     val elements = l.flatMap(v => Option(v))
     if (elements.isEmpty) {
       // If this JSON array is empty, we use NullType as a placeholder.
       // If this array is not empty in other JSON objects, we can resolve
       // the type after we have passed through all JSON objects.
-      ArrayType(NullType, containsNull = true)
+      ArrayType(NullType, containsNull)
     } else {
       val elementType = elements.map {
         e => e match {
@@ -220,7 +207,7 @@ private[sql] object JsonRDD extends Logging {
         }
       }.reduce((type1: DataType, type2: DataType) => compatibleType(type1, type2))
 
-      ArrayType(elementType, containsNull = true)
+      ArrayType(elementType, containsNull)
     }
   }
 
@@ -248,16 +235,16 @@ private[sql] object JsonRDD extends Logging {
         // The value associated with the key is an array.
         // Handle inner structs of an array.
         def buildKeyPathForInnerStructs(v: Any, t: DataType): Seq[(String, DataType)] = t match {
-          case ArrayType(e: StructType, _) => {
+          case ArrayType(StructType(Nil), containsNull) => {
             // The elements of this arrays are structs.
-            v.asInstanceOf[Seq[Map[String, Any]]].flatMap(Option(_)).flatMap {
+            v.asInstanceOf[Seq[Map[String, Any]]].flatMap {
               element => allKeysWithValueTypes(element)
             }.map {
               case (k, t) => (s"$key.$k", t)
             }
           }
-          case ArrayType(t1, _) =>
-            v.asInstanceOf[Seq[Any]].flatMap(Option(_)).flatMap {
+          case ArrayType(t1, containsNull) =>
+            v.asInstanceOf[Seq[Any]].flatMap {
               element => buildKeyPathForInnerStructs(element, t1)
             }
           case other => Nil
@@ -265,8 +252,6 @@ private[sql] object JsonRDD extends Logging {
         val elementType = typeOfArray(array)
         buildKeyPathForInnerStructs(array, elementType) :+ (key, elementType)
       }
-      // we couldn't tell what the type is if the value is null or empty string
-      case (key: String, value) if value == "" || value == null => (key, NullType) :: Nil
       case (key: String, value) => (key, typeOfPrimitiveValue(value)) :: Nil
     }
   }
@@ -288,9 +273,7 @@ private[sql] object JsonRDD extends Logging {
     case atom => atom
   }
 
-  private def parseJson(
-      json: RDD[String],
-      columnNameOfCorruptRecords: String): RDD[Map[String, Any]] = {
+  private def parseJson(json: RDD[String]): RDD[Map[String, Any]] = {
     // According to [Jackson-72: https://jira.codehaus.org/browse/JACKSON-72],
     // ObjectMapper will not return BigDecimal when
     // "DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS" is disabled
@@ -305,20 +288,12 @@ private[sql] object JsonRDD extends Logging {
       // For example: for {"key": 1, "key":2}, we will get "key"->2.
       val mapper = new ObjectMapper()
       iter.flatMap { record =>
-        try {
-          val parsed = mapper.readValue(record, classOf[Object]) match {
-            case map: java.util.Map[_, _] => scalafy(map).asInstanceOf[Map[String, Any]] :: Nil
-            case list: java.util.List[_] => scalafy(list).asInstanceOf[Seq[Map[String, Any]]]
-            case _ =>
-              sys.error(
-                s"Failed to parse record $record. Please make sure that each line of the file " +
-                "(or each string in the RDD) is a valid JSON object or an array of JSON objects.")
-          }
-
-          parsed
-        } catch {
-          case e: JsonProcessingException => Map(columnNameOfCorruptRecords -> record) :: Nil
+        val parsed = mapper.readValue(record, classOf[Object]) match {
+          case map: java.util.Map[_, _] => scalafy(map).asInstanceOf[Map[String, Any]] :: Nil
+          case list: java.util.List[_] => scalafy(list).asInstanceOf[Seq[Map[String, Any]]]
         }
+
+        parsed
       }
     })
   }
@@ -338,13 +313,13 @@ private[sql] object JsonRDD extends Logging {
     }
   }
 
-  private def toDecimal(value: Any): Decimal = {
+  private def toDecimal(value: Any): BigDecimal = {
     value match {
-      case value: java.lang.Integer => Decimal(value)
-      case value: java.lang.Long => Decimal(value)
-      case value: java.math.BigInteger => Decimal(new java.math.BigDecimal(value))
-      case value: java.lang.Double => Decimal(value)
-      case value: java.math.BigDecimal => Decimal(value)
+      case value: java.lang.Integer => BigDecimal(value)
+      case value: java.lang.Long => BigDecimal(value)
+      case value: java.math.BigInteger => BigDecimal(value)
+      case value: java.lang.Double => BigDecimal(value)
+      case value: java.math.BigDecimal => BigDecimal(value)
     }
   }
 
@@ -371,8 +346,7 @@ private[sql] object JsonRDD extends Logging {
       case (key, value) =>
         if (count > 0) builder.append(",")
         count += 1
-        val stringValue = if (value.isInstanceOf[String]) s"""\"$value\"""" else toString(value)
-        builder.append(s"""\"${key}\":${stringValue}""")
+        builder.append(s"""\"${key}\":${toString(value)}""")
     }
     builder.append("}")
 
@@ -387,44 +361,22 @@ private[sql] object JsonRDD extends Logging {
     }
   }
 
-  private def toDate(value: Any): Int = {
-    value match {
-      // only support string as date
-      case value: java.lang.String =>
-        DateUtils.millisToDays(DataTypeConversions.stringToTime(value).getTime)
-      case value: java.sql.Date => DateUtils.fromJavaDate(value)
-    }
-  }
-
-  private def toTimestamp(value: Any): Timestamp = {
-    value match {
-      case value: java.lang.Integer => new Timestamp(value.asInstanceOf[Int].toLong)
-      case value: java.lang.Long => new Timestamp(value)
-      case value: java.lang.String => toTimestamp(DataTypeConversions.stringToTime(value).getTime)
-    }
-  }
-
   private[json] def enforceCorrectType(value: Any, desiredType: DataType): Any ={
     if (value == null) {
       null
     } else {
       desiredType match {
         case StringType => toString(value)
-        case _ if value == null || value == "" => null // guard the non string type
         case IntegerType => value.asInstanceOf[IntegerType.JvmType]
         case LongType => toLong(value)
         case DoubleType => toDouble(value)
-        case DecimalType() => toDecimal(value)
+        case DecimalType => toDecimal(value)
         case BooleanType => value.asInstanceOf[BooleanType.JvmType]
         case NullType => null
+
         case ArrayType(elementType, _) =>
           value.asInstanceOf[Seq[Any]].map(enforceCorrectType(_, elementType))
-        case MapType(StringType, valueType, _) =>
-          val map = value.asInstanceOf[Map[String, Any]]
-          map.mapValues(enforceCorrectType(_, valueType)).map(identity)
         case struct: StructType => asRow(value.asInstanceOf[Map[String, Any]], struct)
-        case DateType => toDate(value)
-        case TimestampType => toTimestamp(value)
       }
     }
   }
@@ -433,61 +385,11 @@ private[sql] object JsonRDD extends Logging {
     // TODO: Reuse the row instead of creating a new one for every record.
     val row = new GenericMutableRow(schema.fields.length)
     schema.fields.zipWithIndex.foreach {
-      case (StructField(name, dataType, _, _), i) =>
+      case (StructField(name, dataType, _), i) =>
         row.update(i, json.get(name).flatMap(v => Option(v)).map(
           enforceCorrectType(_, dataType)).orNull)
     }
 
     row
-  }
-
-  /** Transforms a single Row to JSON using Jackson
-    *
-    * @param rowSchema the schema object used for conversion
-    * @param gen a JsonGenerator object
-    * @param row The row to convert
-    */
-  private[sql] def rowToJSON(rowSchema: StructType, gen: JsonGenerator)(row: Row) = {
-    def valWriter: (DataType, Any) => Unit = {
-      case (_, null) | (NullType, _)  => gen.writeNull()
-      case (StringType, v: String) => gen.writeString(v)
-      case (TimestampType, v: java.sql.Timestamp) => gen.writeString(v.toString)
-      case (IntegerType, v: Int) => gen.writeNumber(v)
-      case (ShortType, v: Short) => gen.writeNumber(v)
-      case (FloatType, v: Float) => gen.writeNumber(v)
-      case (DoubleType, v: Double) => gen.writeNumber(v)
-      case (LongType, v: Long) => gen.writeNumber(v)
-      case (DecimalType(), v: java.math.BigDecimal) => gen.writeNumber(v)
-      case (ByteType, v: Byte) => gen.writeNumber(v.toInt)
-      case (BinaryType, v: Array[Byte]) => gen.writeBinary(v)
-      case (BooleanType, v: Boolean) => gen.writeBoolean(v)
-      case (DateType, v) => gen.writeString(v.toString)
-      case (udt: UserDefinedType[_], v) => valWriter(udt.sqlType, v)
-
-      case (ArrayType(ty, _), v: Seq[_] ) =>
-        gen.writeStartArray()
-        v.foreach(valWriter(ty,_))
-        gen.writeEndArray()
-
-      case (MapType(kv,vv, _), v: Map[_,_]) =>
-        gen.writeStartObject()
-        v.foreach { p =>
-          gen.writeFieldName(p._1.toString)
-          valWriter(vv,p._2)
-        }
-        gen.writeEndObject()
-
-      case (StructType(ty), v: Row) =>
-        gen.writeStartObject()
-        ty.zip(v.toSeq).foreach {
-          case (_, null) =>
-          case (field, v) =>
-            gen.writeFieldName(field.name)
-            valWriter(field.dataType, v)
-        }
-        gen.writeEndObject()
-    }
-
-    valWriter(rowSchema, row)
   }
 }

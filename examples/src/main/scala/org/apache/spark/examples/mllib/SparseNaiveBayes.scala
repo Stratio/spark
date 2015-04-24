@@ -37,7 +37,7 @@ object SparseNaiveBayes {
       input: String = null,
       minPartitions: Int = 0,
       numFeatures: Int = -1,
-      lambda: Double = 1.0) extends AbstractParams[Params]
+      lambda: Double = 1.0)
 
   def main(args: Array[String]) {
     val defaultParams = Params()

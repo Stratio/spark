@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION concat_ws;
 DESCRIBE FUNCTION EXTENDED concat_ws;
 
@@ -26,7 +24,7 @@ SELECT concat_ws('.', array('www', 'face', 'book', 'com'), '1234'),
        concat_ws('_', array('www', 'face'), array('book', 'com', '1234')),
        concat_ws('**', 'www', array('face'), array('book', 'com', '1234')),
        concat_ws('[]', array('www'), 'face', array('book', 'com', '1234')),
-       concat_ws('AAA', array('www'), array('face', 'book', 'com'), '1234') FROM dest1 tablesample (1 rows);
+       concat_ws('AAA', array('www'), array('face', 'book', 'com'), '1234') FROM dest1 LIMIT 1;
 
 SELECT concat_ws('.', array('www', 'face', 'book', 'com'), '1234'),
        concat_ws('-', 'www', array('face', 'book', 'com'), '1234'),
@@ -34,7 +32,7 @@ SELECT concat_ws('.', array('www', 'face', 'book', 'com'), '1234'),
        concat_ws('_', array('www', 'face'), array('book', 'com', '1234')),
        concat_ws('**', 'www', array('face'), array('book', 'com', '1234')),
        concat_ws('[]', array('www'), 'face', array('book', 'com', '1234')),
-       concat_ws('AAA', array('www'), array('face', 'book', 'com'), '1234') FROM dest1 tablesample (1 rows);
+       concat_ws('AAA', array('www'), array('face', 'book', 'com'), '1234') FROM dest1 LIMIT 1;
 
 SELECT concat_ws(NULL, array('www', 'face', 'book', 'com'), '1234'),
        concat_ws(NULL, 'www', array('face', 'book', 'com'), '1234'),
@@ -42,4 +40,4 @@ SELECT concat_ws(NULL, array('www', 'face', 'book', 'com'), '1234'),
        concat_ws(NULL, array('www', 'face'), array('book', 'com', '1234')),
        concat_ws(NULL, 'www', array('face'), array('book', 'com', '1234')),
        concat_ws(NULL, array('www'), 'face', array('book', 'com', '1234')),
-       concat_ws(NULL, array('www'), array('face', 'book', 'com'), '1234') FROM dest1 tablesample (1 rows);
+       concat_ws(NULL, array('www'), array('face', 'book', 'com'), '1234') FROM dest1 LIMIT 1;

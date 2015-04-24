@@ -25,6 +25,8 @@ import org.apache.hadoop.mapreduce.JobContext
 import org.apache.hadoop.mapreduce.lib.input.CombineFileInputFormat
 import org.apache.hadoop.mapreduce.RecordReader
 import org.apache.hadoop.mapreduce.TaskAttemptContext
+import org.apache.hadoop.mapreduce.lib.input.CombineFileRecordReader
+import org.apache.hadoop.mapreduce.lib.input.CombineFileSplit
 
 /**
  * A [[org.apache.hadoop.mapreduce.lib.input.CombineFileInputFormat CombineFileInputFormat]] for
@@ -32,26 +34,23 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext
  * the value is the entire content of file.
  */
 
-private[spark] class WholeTextFileInputFormat
-  extends CombineFileInputFormat[String, String] with Configurable {
-
+private[spark] class WholeTextFileInputFormat extends CombineFileInputFormat[String, String] {
   override protected def isSplitable(context: JobContext, file: Path): Boolean = false
 
   override def createRecordReader(
       split: InputSplit,
       context: TaskAttemptContext): RecordReader[String, String] = {
 
-    val reader =
-      new ConfigurableCombineFileRecordReader(split, context, classOf[WholeTextFileRecordReader])
-    reader.setConf(getConf)
-    reader
+    new CombineFileRecordReader[String, String](
+      split.asInstanceOf[CombineFileSplit],
+      context,
+      classOf[WholeTextFileRecordReader])
   }
 
   /**
-   * Allow minPartitions set by end-user in order to keep compatibility with old Hadoop API,
-   * which is set through setMaxSplitSize
+   * Allow minPartitions set by end-user in order to keep compatibility with old Hadoop API.
    */
-  def setMinPartitions(context: JobContext, minPartitions: Int) {
+  def setMaxSplitSize(context: JobContext, minPartitions: Int) {
     val files = listStatus(context)
     val totalLen = files.map { file =>
       if (file.isDir) 0L else file.getLen

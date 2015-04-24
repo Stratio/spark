@@ -36,7 +36,7 @@ private[master] object MasterMessages {
 
   case object CompleteRecovery
 
-  case object BoundPortsRequest
+  case object RequestWebUIPort
 
-  case class BoundPortsResponse(actorPort: Int, webUIPort: Int, restPort: Option[Int])
+  case class WebUIPortResponse(webUIBoundPort: Int)
 }

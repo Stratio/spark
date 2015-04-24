@@ -19,9 +19,9 @@ package org.apache.spark.mllib.feature
 
 import org.scalatest.FunSuite
 
-import org.apache.spark.mllib.util.MLlibTestSparkContext
+import org.apache.spark.mllib.util.LocalSparkContext
 
-class Word2VecSuite extends FunSuite with MLlibTestSparkContext {
+class Word2VecSuite extends FunSuite with LocalSparkContext {
 
   // TODO: add more tests
 

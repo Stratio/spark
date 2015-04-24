@@ -21,8 +21,8 @@
 #
 # Environment Variables
 #
-#   SPARK_CONF_DIR  Alternate conf dir. Default is ${SPARK_HOME}/conf.
-#   SPARK_LOG_DIR   Where log files are stored. ${SPARK_HOME}/logs by default.
+#   SPARK_CONF_DIR  Alternate conf dir. Default is ${SPARK_PREFIX}/conf.
+#   SPARK_LOG_DIR   Where log files are stored.  PWD by default.
 #   SPARK_MASTER    host:path where spark code should be rsync'd from
 #   SPARK_PID_DIR   The pid files are stored. /tmp by default.
 #   SPARK_IDENT_STRING   A string representing this instance of spark. $USER by default
@@ -62,7 +62,7 @@ then
   shift
 fi
 
-option=$1
+startStop=$1
 shift
 command=$1
 shift
@@ -122,16 +122,15 @@ if [ "$SPARK_NICENESS" = "" ]; then
 fi
 
 
-case $option in
+case $startStop in
 
-  (start|spark-submit)
+  (start)
 
     mkdir -p "$SPARK_PID_DIR"
 
     if [ -f $pid ]; then
-      TARGET_ID="$(cat "$pid")"
-      if [[ $(ps -p "$TARGET_ID" -o comm=) =~ "java" ]]; then
-        echo "$command running as process $TARGET_ID.  Stop it first."
+      if kill -0 `cat $pid` > /dev/null 2>&1; then
+        echo $command running as process `cat $pid`.  Stop it first.
         exit 1
       fi
     fi
@@ -142,20 +141,14 @@ case $option in
     fi
 
     spark_rotate_log "$log"
-    echo "starting $command, logging to $log"
-    if [ $option == spark-submit ]; then
-      source "$SPARK_HOME"/bin/utils.sh
-      gatherSparkSubmitOpts "$@"
-      nohup nice -n $SPARK_NICENESS "$SPARK_PREFIX"/bin/spark-submit --class $command \
-        "${SUBMISSION_OPTS[@]}" spark-internal "${APPLICATION_OPTS[@]}" >> "$log" 2>&1 < /dev/null &
-    else
-      nohup nice -n $SPARK_NICENESS "$SPARK_PREFIX"/bin/spark-class $command "$@" >> "$log" 2>&1 < /dev/null &
-    fi
+    echo starting $command, logging to $log
+    cd "$SPARK_PREFIX"
+    nohup nice -n $SPARK_NICENESS "$SPARK_PREFIX"/bin/spark-class $command "$@" >> "$log" 2>&1 < /dev/null &
     newpid=$!
     echo $newpid > $pid
     sleep 2
     # Check if the process has died; in that case we'll tail the log so the user can see
-    if [[ ! $(ps -p "$newpid" -o comm=) =~ "java" ]]; then
+    if ! kill -0 $newpid >/dev/null 2>&1; then
       echo "failed to launch $command:"
       tail -2 "$log" | sed 's/^/  /'
       echo "full log in $log"
@@ -165,15 +158,14 @@ case $option in
   (stop)
 
     if [ -f $pid ]; then
-      TARGET_ID="$(cat "$pid")"
-      if [[ $(ps -p "$TARGET_ID" -o comm=) =~ "java" ]]; then
-        echo "stopping $command"
-        kill "$TARGET_ID" && rm -f "$pid"
+      if kill -0 `cat $pid` > /dev/null 2>&1; then
+        echo stopping $command
+        kill `cat $pid`
       else
-        echo "no $command to stop"
+        echo no $command to stop
       fi
     else
-      echo "no $command to stop"
+      echo no $command to stop
     fi
     ;;
 

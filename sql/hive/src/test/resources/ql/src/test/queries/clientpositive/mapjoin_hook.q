@@ -1,5 +1,4 @@
-set hive.exec.post.hooks = org.apache.hadoop.hive.ql.hooks.MapJoinCounterHook,org.apache.hadoop.hive.ql.hooks.PrintCompletedTasksHook;
-
+set hive.exec.post.hooks = org.apache.hadoop.hive.ql.hooks.MapJoinCounterHook ;
 drop table dest1;
 CREATE TABLE dest1(key INT, value STRING) STORED AS TEXTFILE;
 

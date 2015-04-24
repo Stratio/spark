@@ -26,7 +26,7 @@ import time
 import gc
 from errno import EINTR, ECHILD, EAGAIN
 from socket import AF_INET, SOCK_STREAM, SOMAXCONN
-from signal import SIGHUP, SIGTERM, SIGCHLD, SIG_DFL, SIG_IGN, SIGINT
+from signal import SIGHUP, SIGTERM, SIGCHLD, SIG_DFL, SIG_IGN
 from pyspark.worker import main as worker_main
 from pyspark.serializers import read_int, write_int
 
@@ -46,9 +46,6 @@ def worker(sock):
     signal.signal(SIGHUP, SIG_DFL)
     signal.signal(SIGCHLD, SIG_DFL)
     signal.signal(SIGTERM, SIG_DFL)
-    # restore the handler for SIGINT,
-    # it's useful for debugging (show the stacktrace before exit)
-    signal.signal(SIGINT, signal.default_int_handler)
 
     # Read the socket using fdopen instead of socket.makefile() because the latter
     # seems to be very slow; note that we need to dup() the file descriptor because
@@ -61,11 +58,9 @@ def worker(sock):
     except SystemExit as exc:
         exit_code = compute_real_exit_code(exc.code)
     finally:
-        try:
-            outfile.flush()
-        except Exception:
-            pass
-    return exit_code
+        outfile.flush()
+        if exit_code:
+            os._exit(exit_code)
 
 
 # Cleanup zombie children
@@ -162,13 +157,10 @@ def manager():
                         outfile.flush()
                         outfile.close()
                         while True:
-                            code = worker(sock)
-                            if not reuse or code:
+                            worker(sock)
+                            if not reuse:
                                 # wait for closing
-                                try:
-                                    while sock.recv(1024):
-                                        pass
-                                except Exception:
+                                while sock.recv(1024):
                                     pass
                                 break
                             gc.collect()

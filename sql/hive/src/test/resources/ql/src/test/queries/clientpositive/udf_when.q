@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION when;
 DESCRIBE FUNCTION EXTENDED when;
 
@@ -29,7 +27,7 @@ SELECT CASE
         WHEN 25=26 THEN 27
         WHEN 28=28 THEN NULL
        END
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT CASE
         WHEN 1=1 THEN 2
@@ -56,21 +54,4 @@ SELECT CASE
         WHEN 25=26 THEN 27
         WHEN 28=28 THEN NULL
        END
-FROM src tablesample (1 rows);
-
--- Allow compatible types to be used in return value
-SELECT CASE
-        WHEN 1=1 THEN 123.0BD
-        ELSE 0.0BD
-       END,
-       CASE
-        WHEN 1=1 THEN 123
-        WHEN 1=2 THEN 1.0
-        ELSE 222.02BD
-       END,
-       CASE
-        WHEN 1=1 THEN 'abcd'
-        WHEN 1=2 THEN cast('efgh' as varchar(10))
-        ELSE cast('ijkl' as char(4))
-       END
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

@@ -48,8 +48,7 @@ object GraphLoader extends Logging {
    * @param path the path to the file (e.g., /home/data/file or hdfs://file)
    * @param canonicalOrientation whether to orient edges in the positive
    *        direction
-   * @param numEdgePartitions the number of partitions for the edge RDD
-   * Setting this value to -1 will use the default parallelism.
+   * @param minEdgePartitions the number of partitions for the edge RDD
    * @param edgeStorageLevel the desired storage level for the edge partitions
    * @param vertexStorageLevel the desired storage level for the vertex partitions
    */
@@ -57,7 +56,7 @@ object GraphLoader extends Logging {
       sc: SparkContext,
       path: String,
       canonicalOrientation: Boolean = false,
-      numEdgePartitions: Int = -1,
+      minEdgePartitions: Int = 1,
       edgeStorageLevel: StorageLevel = StorageLevel.MEMORY_ONLY,
       vertexStorageLevel: StorageLevel = StorageLevel.MEMORY_ONLY)
     : Graph[Int, Int] =
@@ -65,19 +64,14 @@ object GraphLoader extends Logging {
     val startTime = System.currentTimeMillis
 
     // Parse the edge data table directly into edge partitions
-    val lines =
-      if (numEdgePartitions > 0) {
-        sc.textFile(path, numEdgePartitions).coalesce(numEdgePartitions)
-      } else {
-        sc.textFile(path)
-      }
+    val lines = sc.textFile(path, minEdgePartitions).coalesce(minEdgePartitions)
     val edges = lines.mapPartitionsWithIndex { (pid, iter) =>
       val builder = new EdgePartitionBuilder[Int, Int]
       iter.foreach { line =>
         if (!line.isEmpty && line(0) != '#') {
           val lineArray = line.split("\\s+")
           if (lineArray.length < 2) {
-            throw new IllegalArgumentException("Invalid line: " + line)
+            logWarning("Invalid line: " + line)
           }
           val srcId = lineArray(0).toLong
           val dstId = lineArray(1).toLong

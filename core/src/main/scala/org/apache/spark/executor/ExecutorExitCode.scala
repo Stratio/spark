@@ -17,8 +17,6 @@
 
 package org.apache.spark.executor
 
-import org.apache.spark.util.SparkExitCode._
-
 /**
  * These are exit codes that executors should use to provide the master with information about
  * executor failures assuming that cluster management framework can capture the exit codes (but
@@ -29,6 +27,16 @@ import org.apache.spark.util.SparkExitCode._
  */
 private[spark]
 object ExecutorExitCode {
+  /** The default uncaught exception handler was reached. */
+  val UNCAUGHT_EXCEPTION = 50
+
+  /** The default uncaught exception handler was called and an exception was encountered while
+      logging the exception. */
+  val UNCAUGHT_EXCEPTION_TWICE = 51
+
+  /** The default uncaught exception handler was reached, and the uncaught exception was an
+      OutOfMemoryError. */
+  val OOM = 52
 
   /** DiskStore failed to create a local temporary directory after many attempts. */
   val DISK_STORE_FAILED_TO_CREATE_DIR = 53

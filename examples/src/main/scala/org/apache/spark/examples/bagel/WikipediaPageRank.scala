@@ -21,6 +21,7 @@ import org.apache.spark._
 import org.apache.spark.SparkContext._
 
 import org.apache.spark.bagel._
+import org.apache.spark.bagel.Bagel._
 
 import scala.xml.{XML,NodeSeq}
 
@@ -38,7 +39,8 @@ object WikipediaPageRank {
     }
     val sparkConf = new SparkConf()
     sparkConf.setAppName("WikipediaPageRank")
-    sparkConf.registerKryoClasses(Array(classOf[PRVertex], classOf[PRMessage]))
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    sparkConf.set("spark.kryo.registrator",  classOf[PRKryoRegistrator].getName)
 
     val inputFile = args(0)
     val threshold = args(1).toDouble
@@ -76,9 +78,9 @@ object WikipediaPageRank {
       (id, new PRVertex(1.0 / numVertices, outEdges))
     })
     if (usePartitioner) {
-      vertices = vertices.partitionBy(new HashPartitioner(sc.defaultParallelism)).cache()
+      vertices = vertices.partitionBy(new HashPartitioner(sc.defaultParallelism)).cache
     } else {
-      vertices = vertices.cache()
+      vertices = vertices.cache
     }
     println("Done parsing input file.")
 
@@ -98,9 +100,7 @@ object WikipediaPageRank {
       (result
        .filter { case (id, vertex) => vertex.value >= threshold }
        .map { case (id, vertex) => "%s\t%s\n".format(id, vertex.value) }
-       .collect().mkString)
+       .collect.mkString)
     println(top)
-
-    sc.stop()
   }
 }

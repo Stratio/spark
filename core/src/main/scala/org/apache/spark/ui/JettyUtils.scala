@@ -21,7 +21,9 @@ import java.net.{InetSocketAddress, URL}
 import javax.servlet.DispatcherType
 import javax.servlet.http.{HttpServlet, HttpServletRequest, HttpServletResponse}
 
+import scala.annotation.tailrec
 import scala.language.implicitConversions
+import scala.util.{Failure, Success, Try}
 import scala.xml.Node
 
 import org.eclipse.jetty.server.Server
@@ -62,22 +64,17 @@ private[spark] object JettyUtils extends Logging {
       securityMgr: SecurityManager): HttpServlet = {
     new HttpServlet {
       override def doGet(request: HttpServletRequest, response: HttpServletResponse) {
-        try {
-          if (securityMgr.checkUIViewPermissions(request.getRemoteUser)) {
-            response.setContentType("%s;charset=utf-8".format(servletParams.contentType))
-            response.setStatus(HttpServletResponse.SC_OK)
-            val result = servletParams.responder(request)
-            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
-            response.getWriter.println(servletParams.extractFn(result))
-          } else {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED)
-            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
-              "User is not authorized to access this page.")
-          }
-        } catch {
-          case e: IllegalArgumentException =>
-            response.sendError(HttpServletResponse.SC_BAD_REQUEST, e.getMessage)
+        if (securityMgr.checkUIViewPermissions(request.getRemoteUser)) {
+          response.setContentType("%s;charset=utf-8".format(servletParams.contentType))
+          response.setStatus(HttpServletResponse.SC_OK)
+          val result = servletParams.responder(request)
+          response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+          response.getWriter.println(servletParams.extractFn(result))
+        } else {
+          response.setStatus(HttpServletResponse.SC_UNAUTHORIZED)
+          response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+          response.sendError(HttpServletResponse.SC_UNAUTHORIZED,
+            "User is not authorized to access this page.")
         }
       }
     }
@@ -150,19 +147,15 @@ private[spark] object JettyUtils extends Logging {
           val holder : FilterHolder = new FilterHolder()
           holder.setClassName(filter)
           // Get any parameters for each filter
-          conf.get("spark." + filter + ".params", "").split(',').map(_.trim()).toSet.foreach {
-            param: String =>
+          val paramName = "spark." + filter + ".params"
+          val params = conf.get(paramName, "").split(',').map(_.trim()).toSet
+          params.foreach {
+            case param : String =>
               if (!param.isEmpty) {
                 val parts = param.split("=")
                 if (parts.length == 2) holder.setInitParameter(parts(0), parts(1))
              }
           }
-
-          val prefix = s"spark.$filter.param."
-          conf.getAll
-            .filter { case (k, v) => k.length() > prefix.length() && k.startsWith(prefix) }
-            .foreach { case (k, v) => holder.setInitParameter(k.substring(prefix.length()), v) }
-
           val enumDispatcher = java.util.EnumSet.of(DispatcherType.ASYNC, DispatcherType.ERROR,
             DispatcherType.FORWARD, DispatcherType.INCLUDE, DispatcherType.REQUEST)
           handlers.foreach { case(handler) => handler.addFilter(holder, "/*", enumDispatcher) }
@@ -206,7 +199,7 @@ private[spark] object JettyUtils extends Logging {
       }
     }
 
-    val (server, boundPort) = Utils.startServiceOnPort[Server](port, connect, conf, serverName)
+    val (server, boundPort) = Utils.startServiceOnPort[Server](port, connect, serverName)
     ServerInfo(server, boundPort, collection)
   }
 

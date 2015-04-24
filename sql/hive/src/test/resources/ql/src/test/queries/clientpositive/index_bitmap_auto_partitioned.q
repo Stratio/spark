@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 -- test automatic use of index on table with partitions
 CREATE INDEX src_part_index ON TABLE srcpart(key) as 'BITMAP' WITH DEFERRED REBUILD;
 ALTER INDEX src_part_index ON srcpart REBUILD;

@@ -1,4 +1,3 @@
-set hive.fetch.task.conversion=more;
 
 -- Should all be true
 select

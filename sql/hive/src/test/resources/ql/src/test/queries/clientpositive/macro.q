@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 CREATE TEMPORARY MACRO SIGMOID (x DOUBLE) 1.0 / (1.0 + EXP(-x));
 SELECT SIGMOID(2) FROM src LIMIT 1;
 EXPLAIN SELECT SIGMOID(2) FROM src LIMIT 1;

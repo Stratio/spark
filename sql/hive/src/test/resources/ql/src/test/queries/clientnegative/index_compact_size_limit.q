@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 drop index src_index on src;
 
 CREATE INDEX src_index ON TABLE src(key) as 'COMPACT' WITH DEFERRED REBUILD;
