@@ -19,13 +19,22 @@ package org.apache.spark.storage
 
 import java.io.{File, FileWriter}
 
+import org.apache.spark.network.nio.NioBlockTransferService
+import org.apache.spark.shuffle.hash.HashShuffleManager
+
+import scala.collection.mutable
 import scala.language.reflectiveCalls
 
+import akka.actor.Props
+import com.google.common.io.Files
 import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FunSuite}
 
 import org.apache.spark.SparkConf
-import org.apache.spark.util.Utils
+import org.apache.spark.scheduler.LiveListenerBus
+import org.apache.spark.serializer.JavaSerializer
+import org.apache.spark.util.{AkkaUtils, Utils}
+import org.apache.spark.executor.ShuffleWriteMetrics
 
 class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with BeforeAndAfterAll {
   private val testConf = new SparkConf(false)
@@ -39,8 +48,10 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
 
   override def beforeAll() {
     super.beforeAll()
-    rootDir0 = Utils.createTempDir()
-    rootDir1 = Utils.createTempDir()
+    rootDir0 = Files.createTempDir()
+    rootDir0.deleteOnExit()
+    rootDir1 = Files.createTempDir()
+    rootDir1.deleteOnExit()
     rootDirs = rootDir0.getAbsolutePath + "," + rootDir1.getAbsolutePath
   }
 

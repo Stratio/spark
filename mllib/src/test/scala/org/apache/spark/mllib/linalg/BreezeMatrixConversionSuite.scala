@@ -36,11 +36,6 @@ class BreezeMatrixConversionSuite extends FunSuite {
     assert(mat.numRows === breeze.rows)
     assert(mat.numCols === breeze.cols)
     assert(mat.values.eq(breeze.data), "should not copy data")
-    // transposed matrix
-    val matTransposed = Matrices.fromBreeze(breeze.t).asInstanceOf[DenseMatrix]
-    assert(matTransposed.numRows === breeze.cols)
-    assert(matTransposed.numCols === breeze.rows)
-    assert(matTransposed.values.eq(breeze.data), "should not copy data")
   }
 
   test("sparse matrix to breeze") {
@@ -63,9 +58,5 @@ class BreezeMatrixConversionSuite extends FunSuite {
     assert(mat.numRows === breeze.rows)
     assert(mat.numCols === breeze.cols)
     assert(mat.values.eq(breeze.data), "should not copy data")
-    val matTransposed = Matrices.fromBreeze(breeze.t).asInstanceOf[SparseMatrix]
-    assert(matTransposed.numRows === breeze.cols)
-    assert(matTransposed.numCols === breeze.rows)
-    assert(!matTransposed.values.eq(breeze.data), "has to copy data")
   }
 }

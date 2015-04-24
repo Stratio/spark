@@ -24,6 +24,10 @@ class HashShuffleSuite extends ShuffleSuite with BeforeAndAfterAll {
   // This test suite should run all tests in ShuffleSuite with hash-based shuffle.
 
   override def beforeAll() {
-    conf.set("spark.shuffle.manager", "hash")
+    System.setProperty("spark.shuffle.manager", "hash")
+  }
+
+  override def afterAll() {
+    System.clearProperty("spark.shuffle.manager")
   }
 }

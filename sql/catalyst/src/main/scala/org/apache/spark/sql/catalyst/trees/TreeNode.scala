@@ -18,46 +18,12 @@
 package org.apache.spark.sql.catalyst.trees
 
 import org.apache.spark.sql.catalyst.errors._
-import org.apache.spark.sql.types.DataType
 
 /** Used by [[TreeNode.getNodeNumbered]] when traversing the tree for a given number */
 private class MutableInt(var i: Int)
 
-case class Origin(
-  line: Option[Int] = None,
-  startPosition: Option[Int] = None)
-
-/**
- * Provides a location for TreeNodes to ask about the context of their origin.  For example, which
- * line of code is currently being parsed.
- */
-object CurrentOrigin {
-  private val value = new ThreadLocal[Origin]() {
-    override def initialValue: Origin = Origin()
-  }
-
-  def get: Origin = value.get()
-  def set(o: Origin): Unit = value.set(o)
-
-  def reset(): Unit = value.set(Origin())
-
-  def setPosition(line: Int, start: Int): Unit = {
-    value.set(
-      value.get.copy(line = Some(line), startPosition = Some(start)))
-  }
-
-  def withOrigin[A](o: Origin)(f: => A): A = {
-    set(o)
-    val ret = try f finally { reset() }
-    reset()
-    ret
-  }
-}
-
 abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   self: BaseType with Product =>
-
-  val origin: Origin = CurrentOrigin.get
 
   /** Returns a Seq of the children of this node */
   def children: Seq[BaseType]
@@ -78,15 +44,6 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   def foreach(f: BaseType => Unit): Unit = {
     f(this)
     children.foreach(_.foreach(f))
-  }
-
-  /**
-   * Runs the given function recursively on [[children]] then on this node.
-   * @param f the function to be applied to each node in the tree.
-   */
-  def foreachUp(f: BaseType => Unit): Unit = {
-    children.foreach(_.foreach(f))
-    f(this)
   }
 
   /**
@@ -184,10 +141,7 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
    * @param rule the function used to transform this nodes children
    */
   def transformDown(rule: PartialFunction[BaseType, BaseType]): BaseType = {
-    val afterRule = CurrentOrigin.withOrigin(origin) {
-      rule.applyOrElse(this, identity[BaseType])
-    }
-
+    val afterRule = rule.applyOrElse(this, identity[BaseType])
     // Check if unchanged and then possibly return old copy to avoid gc churn.
     if (this fastEquals afterRule) {
       transformChildrenDown(rule)
@@ -221,7 +175,6 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
           Some(arg)
         }
       case m: Map[_,_] => m
-      case d: DataType => d // Avoid unpacking Structs
       case args: Traversable[_] => args.map {
         case arg: TreeNode[_] if children contains arg =>
           val newChild = arg.asInstanceOf[BaseType].transformDown(rule)
@@ -248,13 +201,9 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   def transformUp(rule: PartialFunction[BaseType, BaseType]): BaseType = {
     val afterRuleOnChildren = transformChildrenUp(rule);
     if (this fastEquals afterRuleOnChildren) {
-      CurrentOrigin.withOrigin(origin) {
-        rule.applyOrElse(this, identity[BaseType])
-      }
+      rule.applyOrElse(this, identity[BaseType])
     } else {
-      CurrentOrigin.withOrigin(origin) {
-        rule.applyOrElse(afterRuleOnChildren, identity[BaseType])
-      }
+      rule.applyOrElse(afterRuleOnChildren, identity[BaseType])
     }
   }
 
@@ -278,7 +227,6 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
           Some(arg)
         }
       case m: Map[_,_] => m
-      case d: DataType => d // Avoid unpacking Structs
       case args: Traversable[_] => args.map {
         case arg: TreeNode[_] if children contains arg =>
           val newChild = arg.asInstanceOf[BaseType].transformUp(rule)
@@ -310,42 +258,29 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
    * @param newArgs the new product arguments.
    */
   def makeCopy(newArgs: Array[AnyRef]): this.type = attachTree(this, "makeCopy") {
-    val defaultCtor =
-      getClass.getConstructors
-        .find(_.getParameterTypes.size != 0)
-        .headOption
-        .getOrElse(sys.error(s"No valid constructor for $nodeName"))
-
     try {
-      CurrentOrigin.withOrigin(origin) {
-        // Skip no-arg constructors that are just there for kryo.
-        if (otherCopyArgs.isEmpty) {
-          defaultCtor.newInstance(newArgs: _*).asInstanceOf[this.type]
-        } else {
-          defaultCtor.newInstance((newArgs ++ otherCopyArgs).toArray: _*).asInstanceOf[this.type]
-        }
+      // Skip no-arg constructors that are just there for kryo.
+      val defaultCtor = getClass.getConstructors.find(_.getParameterTypes.size != 0).head
+      if (otherCopyArgs.isEmpty) {
+        defaultCtor.newInstance(newArgs: _*).asInstanceOf[this.type]
+      } else {
+        defaultCtor.newInstance((newArgs ++ otherCopyArgs).toArray: _*).asInstanceOf[this.type]
       }
     } catch {
       case e: java.lang.IllegalArgumentException =>
         throw new TreeNodeException(
-          this,
-          s"""
-             |Failed to copy node.
-             |Is otherCopyArgs specified correctly for $nodeName.
-             |Exception message: ${e.getMessage}
-             |ctor: $defaultCtor?
-             |args: ${newArgs.mkString(", ")}
-           """.stripMargin)
+          this, s"Failed to copy node.  Is otherCopyArgs specified correctly for $nodeName? "
+            + s"Exception message: ${e.getMessage}.")
     }
   }
 
   /** Returns the name of this type of TreeNode.  Defaults to the class name. */
-  def nodeName: String = getClass.getSimpleName
+  def nodeName = getClass.getSimpleName
 
   /**
    * The arguments that should be included in the arg string.  Defaults to the `productIterator`.
    */
-  protected def stringArgs: Iterator[Any] = productIterator
+  protected def stringArgs = productIterator
 
   /** Returns a string representing the arguments to this node, minus any children */
   def argString: String = productIterator.flatMap {
@@ -357,18 +292,18 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   }.mkString(", ")
 
   /** String representation of this node without any children */
-  def simpleString: String = s"$nodeName $argString".trim
+  def simpleString = s"$nodeName $argString"
 
   override def toString: String = treeString
 
   /** Returns a string representation of the nodes in this tree */
-  def treeString: String = generateTreeString(0, new StringBuilder).toString
+  def treeString = generateTreeString(0, new StringBuilder).toString
 
   /**
    * Returns a string representation of the nodes in this tree, where each operator is numbered.
    * The numbers can be used with [[trees.TreeNode.apply apply]] to easily access specific subtrees.
    */
-  def numberedTreeString: String =
+  def numberedTreeString =
     treeString.split("\n").zipWithIndex.map { case (line, i) => f"$i%02d $line" }.mkString("\n")
 
   /**
@@ -420,14 +355,14 @@ trait BinaryNode[BaseType <: TreeNode[BaseType]] {
   def left: BaseType
   def right: BaseType
 
-  def children: Seq[BaseType] = Seq(left, right)
+  def children = Seq(left, right)
 }
 
 /**
  * A [[TreeNode]] with no children.
  */
 trait LeafNode[BaseType <: TreeNode[BaseType]] {
-  def children: Seq[BaseType] = Nil
+  def children = Nil
 }
 
 /**
@@ -435,5 +370,6 @@ trait LeafNode[BaseType <: TreeNode[BaseType]] {
  */
 trait UnaryNode[BaseType <: TreeNode[BaseType]] {
   def child: BaseType
-  def children: Seq[BaseType] = child :: Nil
+  def children = child :: Nil
 }
+

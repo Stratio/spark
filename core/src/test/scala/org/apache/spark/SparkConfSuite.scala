@@ -17,26 +17,27 @@
 
 package org.apache.spark
 
-import java.util.concurrent.{TimeUnit, Executors}
-
-import scala.util.{Try, Random}
-
 import org.scalatest.FunSuite
-import org.apache.spark.serializer.{KryoRegistrator, KryoSerializer}
-import org.apache.spark.util.ResetSystemProperties
-import com.esotericsoftware.kryo.Kryo
 
-class SparkConfSuite extends FunSuite with LocalSparkContext with ResetSystemProperties {
+class SparkConfSuite extends FunSuite with LocalSparkContext {
   test("loading from system properties") {
-    System.setProperty("spark.test.testProperty", "2")
-    val conf = new SparkConf()
-    assert(conf.get("spark.test.testProperty") === "2")
+    try {
+      System.setProperty("spark.test.testProperty", "2")
+      val conf = new SparkConf()
+      assert(conf.get("spark.test.testProperty") === "2")
+    } finally {
+      System.clearProperty("spark.test.testProperty")
+    }
   }
 
   test("initializing without loading defaults") {
-    System.setProperty("spark.test.testProperty", "2")
-    val conf = new SparkConf(false)
-    assert(!conf.contains("spark.test.testProperty"))
+    try {
+      System.setProperty("spark.test.testProperty", "2")
+      val conf = new SparkConf(false)
+      assert(!conf.contains("spark.test.testProperty"))
+    } finally {
+      System.clearProperty("spark.test.testProperty")
+    }
   }
 
   test("named set methods") {
@@ -114,97 +115,22 @@ class SparkConfSuite extends FunSuite with LocalSparkContext with ResetSystemPro
 
   test("nested property names") {
     // This wasn't supported by some external conf parsing libraries
-    System.setProperty("spark.test.a", "a")
-    System.setProperty("spark.test.a.b", "a.b")
-    System.setProperty("spark.test.a.b.c", "a.b.c")
-    val conf = new SparkConf()
-    assert(conf.get("spark.test.a") === "a")
-    assert(conf.get("spark.test.a.b") === "a.b")
-    assert(conf.get("spark.test.a.b.c") === "a.b.c")
-    conf.set("spark.test.a.b", "A.B")
-    assert(conf.get("spark.test.a") === "a")
-    assert(conf.get("spark.test.a.b") === "A.B")
-    assert(conf.get("spark.test.a.b.c") === "a.b.c")
-  }
-
-  test("Thread safeness - SPARK-5425") {
-    import scala.collection.JavaConversions._
-    val executor = Executors.newSingleThreadScheduledExecutor()
-    val sf = executor.scheduleAtFixedRate(new Runnable {
-      override def run(): Unit =
-        System.setProperty("spark.5425." + Random.nextInt(), Random.nextInt().toString)
-    }, 0, 1, TimeUnit.MILLISECONDS)
-
     try {
-      val t0 = System.currentTimeMillis()
-      while ((System.currentTimeMillis() - t0) < 1000) {
-        val conf = Try(new SparkConf(loadDefaults = true))
-        assert(conf.isSuccess === true)
-      }
+      System.setProperty("spark.test.a", "a")
+      System.setProperty("spark.test.a.b", "a.b")
+      System.setProperty("spark.test.a.b.c", "a.b.c")
+      val conf = new SparkConf()
+      assert(conf.get("spark.test.a") === "a")
+      assert(conf.get("spark.test.a.b") === "a.b")
+      assert(conf.get("spark.test.a.b.c") === "a.b.c")
+      conf.set("spark.test.a.b", "A.B")
+      assert(conf.get("spark.test.a") === "a")
+      assert(conf.get("spark.test.a.b") === "A.B")
+      assert(conf.get("spark.test.a.b.c") === "a.b.c")
     } finally {
-      executor.shutdownNow()
-      for (key <- System.getProperties.stringPropertyNames() if key.startsWith("spark.5425."))
-        System.getProperties.remove(key)
+      System.clearProperty("spark.test.a")
+      System.clearProperty("spark.test.a.b")
+      System.clearProperty("spark.test.a.b.c")
     }
-  }
-
-  test("register kryo classes through registerKryoClasses") {
-    val conf = new SparkConf().set("spark.kryo.registrationRequired", "true")
-
-    conf.registerKryoClasses(Array(classOf[Class1], classOf[Class2]))
-    assert(conf.get("spark.kryo.classesToRegister") ===
-      classOf[Class1].getName + "," + classOf[Class2].getName)
-
-    conf.registerKryoClasses(Array(classOf[Class3]))
-    assert(conf.get("spark.kryo.classesToRegister") ===
-      classOf[Class1].getName + "," + classOf[Class2].getName + "," + classOf[Class3].getName)
-
-    conf.registerKryoClasses(Array(classOf[Class2]))
-    assert(conf.get("spark.kryo.classesToRegister") ===
-      classOf[Class1].getName + "," + classOf[Class2].getName + "," + classOf[Class3].getName)
-
-    // Kryo doesn't expose a way to discover registered classes, but at least make sure this doesn't
-    // blow up.
-    val serializer = new KryoSerializer(conf)
-    serializer.newInstance().serialize(new Class1())
-    serializer.newInstance().serialize(new Class2())
-    serializer.newInstance().serialize(new Class3())
-  }
-
-  test("register kryo classes through registerKryoClasses and custom registrator") {
-    val conf = new SparkConf().set("spark.kryo.registrationRequired", "true")
-
-    conf.registerKryoClasses(Array(classOf[Class1]))
-    assert(conf.get("spark.kryo.classesToRegister") === classOf[Class1].getName)
-
-    conf.set("spark.kryo.registrator", classOf[CustomRegistrator].getName)
-
-    // Kryo doesn't expose a way to discover registered classes, but at least make sure this doesn't
-    // blow up.
-    val serializer = new KryoSerializer(conf)
-    serializer.newInstance().serialize(new Class1())
-    serializer.newInstance().serialize(new Class2())
-  }
-
-  test("register kryo classes through conf") {
-    val conf = new SparkConf().set("spark.kryo.registrationRequired", "true")
-    conf.set("spark.kryo.classesToRegister", "java.lang.StringBuffer")
-    conf.set("spark.serializer", classOf[KryoSerializer].getName)
-
-    // Kryo doesn't expose a way to discover registered classes, but at least make sure this doesn't
-    // blow up.
-    val serializer = new KryoSerializer(conf)
-    serializer.newInstance().serialize(new StringBuffer())
-  }
-
-}
-
-class Class1 {}
-class Class2 {}
-class Class3 {}
-
-class CustomRegistrator extends KryoRegistrator {
-  def registerClasses(kryo: Kryo) {
-    kryo.register(classOf[Class2])
   }
 }

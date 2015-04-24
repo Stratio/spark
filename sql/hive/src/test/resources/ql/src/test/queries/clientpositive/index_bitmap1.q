@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 EXPLAIN
 CREATE INDEX src_index ON TABLE src(key) as 'BITMAP' WITH DEFERRED REBUILD;
 CREATE INDEX src_index ON TABLE src(key) as 'BITMAP' WITH DEFERRED REBUILD;

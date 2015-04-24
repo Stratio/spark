@@ -19,7 +19,6 @@ package org.apache.spark.shuffle
 
 import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.{FetchFailed, TaskEndReason}
-import org.apache.spark.util.Utils
 
 /**
  * Failed to fetch a shuffle block. The executor catches this exception and propagates it
@@ -31,22 +30,13 @@ private[spark] class FetchFailedException(
     bmAddress: BlockManagerId,
     shuffleId: Int,
     mapId: Int,
-    reduceId: Int,
-    message: String,
-    cause: Throwable = null)
-  extends Exception(message, cause) {
+    reduceId: Int)
+  extends Exception {
 
-  def this(
-      bmAddress: BlockManagerId,
-      shuffleId: Int,
-      mapId: Int,
-      reduceId: Int,
-      cause: Throwable) {
-    this(bmAddress, shuffleId, mapId, reduceId, cause.getMessage, cause)
-  }
+  override def getMessage: String =
+    "Fetch failed: %s %d %d %d".format(bmAddress, shuffleId, mapId, reduceId)
 
-  def toTaskEndReason: TaskEndReason = FetchFailed(bmAddress, shuffleId, mapId, reduceId,
-    Utils.exceptionString(this))
+  def toTaskEndReason: TaskEndReason = FetchFailed(bmAddress, shuffleId, mapId, reduceId)
 }
 
 /**
@@ -56,4 +46,7 @@ private[spark] class MetadataFetchFailedException(
     shuffleId: Int,
     reduceId: Int,
     message: String)
-  extends FetchFailedException(null, shuffleId, -1, reduceId, message)
+  extends FetchFailedException(null, shuffleId, -1, reduceId) {
+
+  override def getMessage: String = message
+}

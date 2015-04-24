@@ -17,19 +17,13 @@
 
 package org.apache.spark.network
 
-import java.io.Closeable
-import java.nio.ByteBuffer
-
-import scala.concurrent.{Promise, Await, Future}
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 
-import org.apache.spark.Logging
-import org.apache.spark.network.buffer.{NioManagedBuffer, ManagedBuffer}
-import org.apache.spark.network.shuffle.{ShuffleClient, BlockFetchingListener}
-import org.apache.spark.storage.{BlockManagerId, BlockId, StorageLevel}
+import org.apache.spark.storage.StorageLevel
 
-private[spark]
-abstract class BlockTransferService extends ShuffleClient with Closeable with Logging {
+
+abstract class BlockTransferService {
 
   /**
    * Initialize the transfer service by giving it the BlockDataManager that can be used to fetch
@@ -40,7 +34,7 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
   /**
    * Tear down the transfer service.
    */
-  def close(): Unit
+  def stop(): Unit
 
   /**
    * Port number the service is listening on, available only after [[init]] is invoked.
@@ -56,15 +50,17 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
    * Fetch a sequence of blocks from a remote node asynchronously,
    * available only after [[init]] is invoked.
    *
+   * Note that [[BlockFetchingListener.onBlockFetchSuccess]] is called once per block,
+   * while [[BlockFetchingListener.onBlockFetchFailure]] is called once per failure (not per block).
+   *
    * Note that this API takes a sequence so the implementation can batch requests, and does not
    * return a future so the underlying implementation can invoke onBlockFetchSuccess as soon as
    * the data of a block is fetched, rather than waiting for all blocks to be fetched.
    */
-  override def fetchBlocks(
-      host: String,
+  def fetchBlocks(
+      hostName: String,
       port: Int,
-      execId: String,
-      blockIds: Array[String],
+      blockIds: Seq[String],
       listener: BlockFetchingListener): Unit
 
   /**
@@ -73,8 +69,7 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
   def uploadBlock(
       hostname: String,
       port: Int,
-      execId: String,
-      blockId: BlockId,
+      blockId: String,
       blockData: ManagedBuffer,
       level: StorageLevel): Future[Unit]
 
@@ -83,23 +78,40 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
    *
    * It is also only available after [[init]] is invoked.
    */
-  def fetchBlockSync(host: String, port: Int, execId: String, blockId: String): ManagedBuffer = {
+  def fetchBlockSync(hostName: String, port: Int, blockId: String): ManagedBuffer = {
     // A monitor for the thread to wait on.
-    val result = Promise[ManagedBuffer]()
-    fetchBlocks(host, port, execId, Array(blockId),
-      new BlockFetchingListener {
-        override def onBlockFetchFailure(blockId: String, exception: Throwable): Unit = {
-          result.failure(exception)
+    val lock = new Object
+    @volatile var result: Either[ManagedBuffer, Throwable] = null
+    fetchBlocks(hostName, port, Seq(blockId), new BlockFetchingListener {
+      override def onBlockFetchFailure(exception: Throwable): Unit = {
+        lock.synchronized {
+          result = Right(exception)
+          lock.notify()
         }
-        override def onBlockFetchSuccess(blockId: String, data: ManagedBuffer): Unit = {
-          val ret = ByteBuffer.allocate(data.size.toInt)
-          ret.put(data.nioByteBuffer())
-          ret.flip()
-          result.success(new NioManagedBuffer(ret))
+      }
+      override def onBlockFetchSuccess(blockId: String, data: ManagedBuffer): Unit = {
+        lock.synchronized {
+          result = Left(data)
+          lock.notify()
         }
-      })
+      }
+    })
 
-    Await.result(result.future, Duration.Inf)
+    // Sleep until result is no longer null
+    lock.synchronized {
+      while (result == null) {
+        try {
+          lock.wait()
+        } catch {
+          case e: InterruptedException =>
+        }
+      }
+    }
+
+    result match {
+      case Left(data) => data
+      case Right(e) => throw e
+    }
   }
 
   /**
@@ -111,10 +123,9 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
   def uploadBlockSync(
       hostname: String,
       port: Int,
-      execId: String,
-      blockId: BlockId,
+      blockId: String,
       blockData: ManagedBuffer,
       level: StorageLevel): Unit = {
-    Await.result(uploadBlock(hostname, port, execId, blockId, blockData, level), Duration.Inf)
+    Await.result(uploadBlock(hostname, port, blockId, blockData, level), Duration.Inf)
   }
 }

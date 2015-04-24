@@ -1,23 +1,10 @@
 pyspark.sql module
 ==================
 
-Module Context
---------------
+Module contents
+---------------
 
 .. automodule:: pyspark.sql
     :members:
     :undoc-members:
-
-
-pyspark.sql.types module
-------------------------
-.. automodule:: pyspark.sql.types
-    :members:
-    :undoc-members:
-
-
-pyspark.sql.functions module
-----------------------------
-.. automodule:: pyspark.sql.functions
-    :members:
-    :undoc-members:
+    :show-inheritance:

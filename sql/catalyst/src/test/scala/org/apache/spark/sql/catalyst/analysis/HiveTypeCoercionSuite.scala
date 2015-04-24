@@ -17,13 +17,13 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import org.apache.spark.sql.catalyst.plans.PlanTest
+import org.scalatest.FunSuite
 
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, Project}
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.catalyst.types._
 
-class HiveTypeCoercionSuite extends PlanTest {
+class HiveTypeCoercionSuite extends FunSuite {
 
   test("tightest common bound for types") {
     def widenTest(t1: DataType, t2: DataType, tightestCommon: Option[DataType]) {
@@ -68,21 +68,6 @@ class HiveTypeCoercionSuite extends PlanTest {
     widenTest(LongType, FloatType, Some(FloatType))
     widenTest(LongType, DoubleType, Some(DoubleType))
 
-    // Casting up to unlimited-precision decimal
-    widenTest(IntegerType, DecimalType.Unlimited, Some(DecimalType.Unlimited))
-    widenTest(DoubleType, DecimalType.Unlimited, Some(DecimalType.Unlimited))
-    widenTest(DecimalType(3, 2), DecimalType.Unlimited, Some(DecimalType.Unlimited))
-    widenTest(DecimalType.Unlimited, IntegerType, Some(DecimalType.Unlimited))
-    widenTest(DecimalType.Unlimited, DoubleType, Some(DecimalType.Unlimited))
-    widenTest(DecimalType.Unlimited, DecimalType(3, 2), Some(DecimalType.Unlimited))
-
-    // No up-casting for fixed-precision decimal (this is handled by arithmetic rules)
-    widenTest(DecimalType(2, 1), DecimalType(3, 2), None)
-    widenTest(DecimalType(2, 1), DoubleType, None)
-    widenTest(DecimalType(2, 1), IntegerType, None)
-    widenTest(DoubleType, DecimalType(2, 1), None)
-    widenTest(IntegerType, DecimalType(2, 1), None)
-
     // StringType
     widenTest(NullType, StringType, Some(StringType))
     widenTest(StringType, StringType, Some(StringType))
@@ -106,41 +91,12 @@ class HiveTypeCoercionSuite extends PlanTest {
     val booleanCasts = new HiveTypeCoercion { }.BooleanCasts
     def ruleTest(initial: Expression, transformed: Expression) {
       val testRelation = LocalRelation(AttributeReference("a", IntegerType)())
-      comparePlans(
-        booleanCasts(Project(Seq(Alias(initial, "a")()), testRelation)),
-        Project(Seq(Alias(transformed, "a")()), testRelation))
+      assert(booleanCasts(Project(Seq(Alias(initial, "a")()), testRelation)) ==
+        Project(Seq(Alias(transformed, "a")()), testRelation))      
     }
     // Remove superflous boolean -> boolean casts.
     ruleTest(Cast(Literal(true), BooleanType), Literal(true))
     // Stringify boolean when casting to string.
     ruleTest(Cast(Literal(false), StringType), If(Literal(false), Literal("true"), Literal("false")))
-  }
-
-  test("coalesce casts") {
-    val fac = new HiveTypeCoercion { }.FunctionArgumentConversion
-    def ruleTest(initial: Expression, transformed: Expression) {
-      val testRelation = LocalRelation(AttributeReference("a", IntegerType)())
-      comparePlans(
-        fac(Project(Seq(Alias(initial, "a")()), testRelation)),
-        Project(Seq(Alias(transformed, "a")()), testRelation))
-    }
-    ruleTest(
-      Coalesce(Literal(1.0)
-        :: Literal(1)
-        :: Literal(1.0, FloatType)
-        :: Nil),
-      Coalesce(Cast(Literal(1.0), DoubleType)
-        :: Cast(Literal(1), DoubleType)
-        :: Cast(Literal(1.0, FloatType), DoubleType)
-        :: Nil))
-    ruleTest(
-      Coalesce(Literal(1L)
-        :: Literal(1)
-        :: Literal(new java.math.BigDecimal("1000000000000000000000"))
-        :: Nil),
-      Coalesce(Cast(Literal(1L), DecimalType())
-        :: Cast(Literal(1), DecimalType())
-        :: Cast(Literal(new java.math.BigDecimal("1000000000000000000000")), DecimalType())
-        :: Nil))
   }
 }

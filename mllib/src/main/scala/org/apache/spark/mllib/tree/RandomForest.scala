@@ -17,20 +17,17 @@
 
 package org.apache.spark.mllib.tree
 
-import java.io.IOException
-
-import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 import org.apache.spark.Logging
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.tree.configuration.Strategy
 import org.apache.spark.mllib.tree.configuration.Algo._
 import org.apache.spark.mllib.tree.configuration.QuantileStrategy._
-import org.apache.spark.mllib.tree.impl.{BaggedPoint, DecisionTreeMetadata, NodeIdCache,
-  TimeTracker, TreePoint}
+import org.apache.spark.mllib.tree.configuration.Strategy
+import org.apache.spark.mllib.tree.impl.{BaggedPoint, TreePoint, DecisionTreeMetadata, TimeTracker}
 import org.apache.spark.mllib.tree.impurity.Impurities
 import org.apache.spark.mllib.tree.model._
 import org.apache.spark.rdd.RDD
@@ -39,8 +36,7 @@ import org.apache.spark.util.Utils
 
 /**
  * :: Experimental ::
- * A class that implements a [[http://en.wikipedia.org/wiki/Random_forest  Random Forest]]
- * learning algorithm for classification and regression.
+ * A class which implements a random forest learning algorithm for classification and regression.
  * It supports both continuous and categorical features.
  *
  * The settings for featureSubsetStrategy are based on the following references:
@@ -58,12 +54,12 @@ import org.apache.spark.util.Utils
  *                 etc.
  * @param numTrees If 1, then no bootstrapping is used.  If > 1, then bootstrapping is done.
  * @param featureSubsetStrategy Number of features to consider for splits at each node.
- *                              Supported: "auto", "all", "sqrt", "log2", "onethird".
+ *                              Supported: "auto" (default), "all", "sqrt", "log2", "onethird".
  *                              If "auto" is set, this parameter is set based on numTrees:
  *                                if numTrees == 1, set to "all";
  *                                if numTrees > 1 (forest) set to "sqrt" for classification and
  *                                  to "onethird" for regression.
- * @param seed Random seed for bootstrapping and choosing feature subsets.
+ * @param seed  Random seed for bootstrapping and choosing feature subsets.
  */
 @Experimental
 private class RandomForest (
@@ -72,47 +68,6 @@ private class RandomForest (
     featureSubsetStrategy: String,
     private val seed: Int)
   extends Serializable with Logging {
-
-  /*
-     ALGORITHM
-     This is a sketch of the algorithm to help new developers.
-
-     The algorithm partitions data by instances (rows).
-     On each iteration, the algorithm splits a set of nodes.  In order to choose the best split
-     for a given node, sufficient statistics are collected from the distributed data.
-     For each node, the statistics are collected to some worker node, and that worker selects
-     the best split.
-
-     This setup requires discretization of continuous features.  This binning is done in the
-     findSplitsBins() method during initialization, after which each continuous feature becomes
-     an ordered discretized feature with at most maxBins possible values.
-
-     The main loop in the algorithm operates on a queue of nodes (nodeQueue).  These nodes
-     lie at the periphery of the tree being trained.  If multiple trees are being trained at once,
-     then this queue contains nodes from all of them.  Each iteration works roughly as follows:
-       On the master node:
-         - Some number of nodes are pulled off of the queue (based on the amount of memory
-           required for their sufficient statistics).
-         - For random forests, if featureSubsetStrategy is not "all," then a subset of candidate
-           features are chosen for each node.  See method selectNodesToSplit().
-       On worker nodes, via method findBestSplits():
-         - The worker makes one pass over its subset of instances.
-         - For each (tree, node, feature, split) tuple, the worker collects statistics about
-           splitting.  Note that the set of (tree, node) pairs is limited to the nodes selected
-           from the queue for this iteration.  The set of features considered can also be limited
-           based on featureSubsetStrategy.
-         - For each node, the statistics for that node are aggregated to a particular worker
-           via reduceByKey().  The designated worker chooses the best (feature, split) pair,
-           or chooses to stop splitting if the stopping criteria are met.
-       On the master node:
-         - The master collects all decisions about splitting nodes and updates the model.
-         - The updated model is passed to the workers on the next iteration.
-     This process continues until the node queue is empty.
-
-     Most of the methods in this implementation support the statistics aggregation, which is
-     the heaviest part of the computation.  In general, this implementation is bound by either
-     the cost of statistics computation on workers or by communicating the sufficient statistics.
-   */
 
   strategy.assertValid()
   require(numTrees > 0, s"RandomForest requires numTrees > 0, but was given numTrees = $numTrees.")
@@ -123,9 +78,9 @@ private class RandomForest (
   /**
    * Method to train a decision tree model over an RDD
    * @param input Training data: RDD of [[org.apache.spark.mllib.regression.LabeledPoint]]
-   * @return a random forest model that can be used for prediction
+   * @return RandomForestModel that can be used for prediction
    */
-  def run(input: RDD[LabeledPoint]): RandomForestModel = {
+  def train(input: RDD[LabeledPoint]): RandomForestModel = {
 
     val timer = new TimeTracker()
 
@@ -142,7 +97,6 @@ private class RandomForest (
     logDebug("maxBins = " + metadata.maxBins)
     logDebug("featureSubsetStrategy = " + featureSubsetStrategy)
     logDebug("numFeaturesPerNode = " + metadata.numFeaturesPerNode)
-    logDebug("subsamplingRate = " + strategy.subsamplingRate)
 
     // Find the splits and the corresponding bins (interval between the splits) using a sample
     // of the input data.
@@ -157,13 +111,11 @@ private class RandomForest (
     // Bin feature values (TreePoint representation).
     // Cache input RDD for speedup during multiple passes.
     val treeInput = TreePoint.convertToTreeRDD(retaggedInput, bins, metadata)
-
-    val withReplacement = if (numTrees > 1) true else false
-
-    val baggedInput
-      = BaggedPoint.convertToBaggedRDD(treeInput,
-          strategy.subsamplingRate, numTrees,
-          withReplacement, seed).persist(StorageLevel.MEMORY_AND_DISK)
+    val baggedInput = if (numTrees > 1) {
+      BaggedPoint.convertToBaggedRDD(treeInput, numTrees, seed)
+    } else {
+      BaggedPoint.convertToBaggedRDDWithoutSampling(treeInput)
+    }.persist(StorageLevel.MEMORY_AND_DISK)
 
     // depth of the decision tree
     val maxDepth = strategy.maxDepth
@@ -198,18 +150,6 @@ private class RandomForest (
      * in lower levels).
      */
 
-    // Create an RDD of node Id cache.
-    // At first, all the rows belong to the root nodes (node Id == 1).
-    val nodeIdCache = if (strategy.useNodeIdCache) {
-      Some(NodeIdCache.init(
-        data = baggedInput,
-        numTrees = numTrees,
-        checkpointInterval = strategy.checkpointInterval,
-        initVal = 1))
-    } else {
-      None
-    }
-
     // FIFO queue of nodes to train: (treeIndex, node)
     val nodeQueue = new mutable.Queue[(Int, Node)]()
 
@@ -231,30 +171,18 @@ private class RandomForest (
 
       // Choose node splits, and enqueue new nodes as needed.
       timer.start("findBestSplits")
-      DecisionTree.findBestSplits(baggedInput, metadata, topNodes, nodesForGroup,
-        treeToNodeToIndexInfo, splits, bins, nodeQueue, timer, nodeIdCache = nodeIdCache)
+      DecisionTree.findBestSplits(baggedInput,
+        metadata, topNodes, nodesForGroup, treeToNodeToIndexInfo, splits, bins, nodeQueue, timer)
       timer.stop("findBestSplits")
     }
-
-    baggedInput.unpersist()
 
     timer.stop("total")
 
     logInfo("Internal timing for DecisionTree:")
     logInfo(s"$timer")
 
-    // Delete any remaining checkpoints used for node Id cache.
-    if (nodeIdCache.nonEmpty) {
-      try {
-        nodeIdCache.get.deleteAllCheckpoints()
-      } catch {
-        case e:IOException =>
-          logWarning(s"delete all chackpoints failed. Error reason: ${e.getMessage}")
-      }
-    }
-
     val trees = topNodes.map(topNode => new DecisionTreeModel(topNode, strategy.algo))
-    new RandomForestModel(strategy.algo, trees)
+    RandomForestModel.build(trees)
   }
 
 }
@@ -269,12 +197,13 @@ object RandomForest extends Serializable with Logging {
    * @param strategy Parameters for training each tree in the forest.
    * @param numTrees Number of trees in the random forest.
    * @param featureSubsetStrategy Number of features to consider for splits at each node.
-   *                              Supported: "auto", "all", "sqrt", "log2", "onethird".
+   *                              Supported: "auto" (default), "all", "sqrt", "log2", "onethird".
    *                              If "auto" is set, this parameter is set based on numTrees:
    *                                if numTrees == 1, set to "all";
-   *                                if numTrees > 1 (forest) set to "sqrt".
+   *                                if numTrees > 1 (forest) set to "sqrt" for classification and
+   *                                  to "onethird" for regression.
    * @param seed  Random seed for bootstrapping and choosing feature subsets.
-   * @return a random forest model that can be used for prediction
+   * @return RandomForestModel that can be used for prediction
    */
   def trainClassifier(
       input: RDD[LabeledPoint],
@@ -285,7 +214,7 @@ object RandomForest extends Serializable with Logging {
     require(strategy.algo == Classification,
       s"RandomForest.trainClassifier given Strategy with invalid algo: ${strategy.algo}")
     val rf = new RandomForest(strategy, numTrees, featureSubsetStrategy, seed)
-    rf.run(input)
+    rf.train(input)
   }
 
   /**
@@ -293,16 +222,17 @@ object RandomForest extends Serializable with Logging {
    *
    * @param input Training dataset: RDD of [[org.apache.spark.mllib.regression.LabeledPoint]].
    *              Labels should take values {0, 1, ..., numClasses-1}.
-   * @param numClasses number of classes for classification.
+   * @param numClassesForClassification number of classes for classification.
    * @param categoricalFeaturesInfo Map storing arity of categorical features.
    *                                E.g., an entry (n -> k) indicates that feature n is categorical
    *                                with k categories indexed from 0: {0, 1, ..., k-1}.
    * @param numTrees Number of trees in the random forest.
    * @param featureSubsetStrategy Number of features to consider for splits at each node.
-   *                              Supported: "auto", "all", "sqrt", "log2", "onethird".
+   *                              Supported: "auto" (default), "all", "sqrt", "log2", "onethird".
    *                              If "auto" is set, this parameter is set based on numTrees:
    *                                if numTrees == 1, set to "all";
-   *                                if numTrees > 1 (forest) set to "sqrt".
+   *                                if numTrees > 1 (forest) set to "sqrt" for classification and
+   *                                  to "onethird" for regression.
    * @param impurity Criterion used for information gain calculation.
    *                 Supported values: "gini" (recommended) or "entropy".
    * @param maxDepth Maximum depth of the tree.
@@ -311,11 +241,11 @@ object RandomForest extends Serializable with Logging {
    * @param maxBins maximum number of bins used for splitting features
    *                 (suggested value: 100)
    * @param seed  Random seed for bootstrapping and choosing feature subsets.
-   * @return a random forest model  that can be used for prediction
+   * @return RandomForestModel that can be used for prediction
    */
   def trainClassifier(
       input: RDD[LabeledPoint],
-      numClasses: Int,
+      numClassesForClassification: Int,
       categoricalFeaturesInfo: Map[Int, Int],
       numTrees: Int,
       featureSubsetStrategy: String,
@@ -325,7 +255,7 @@ object RandomForest extends Serializable with Logging {
       seed: Int = Utils.random.nextInt()): RandomForestModel = {
     val impurityType = Impurities.fromString(impurity)
     val strategy = new Strategy(Classification, impurityType, maxDepth,
-      numClasses, maxBins, Sort, categoricalFeaturesInfo)
+      numClassesForClassification, maxBins, Sort, categoricalFeaturesInfo)
     trainClassifier(input, strategy, numTrees, featureSubsetStrategy, seed)
   }
 
@@ -334,7 +264,7 @@ object RandomForest extends Serializable with Logging {
    */
   def trainClassifier(
       input: JavaRDD[LabeledPoint],
-      numClasses: Int,
+      numClassesForClassification: Int,
       categoricalFeaturesInfo: java.util.Map[java.lang.Integer, java.lang.Integer],
       numTrees: Int,
       featureSubsetStrategy: String,
@@ -342,7 +272,7 @@ object RandomForest extends Serializable with Logging {
       maxDepth: Int,
       maxBins: Int,
       seed: Int): RandomForestModel = {
-    trainClassifier(input.rdd, numClasses,
+    trainClassifier(input.rdd, numClassesForClassification,
       categoricalFeaturesInfo.asInstanceOf[java.util.Map[Int, Int]].asScala.toMap,
       numTrees, featureSubsetStrategy, impurity, maxDepth, maxBins, seed)
   }
@@ -355,12 +285,13 @@ object RandomForest extends Serializable with Logging {
    * @param strategy Parameters for training each tree in the forest.
    * @param numTrees Number of trees in the random forest.
    * @param featureSubsetStrategy Number of features to consider for splits at each node.
-   *                              Supported: "auto", "all", "sqrt", "log2", "onethird".
+   *                              Supported: "auto" (default), "all", "sqrt", "log2", "onethird".
    *                              If "auto" is set, this parameter is set based on numTrees:
    *                                if numTrees == 1, set to "all";
-   *                                if numTrees > 1 (forest) set to "onethird".
+   *                                if numTrees > 1 (forest) set to "sqrt" for classification and
+   *                                  to "onethird" for regression.
    * @param seed  Random seed for bootstrapping and choosing feature subsets.
-   * @return a random forest model that can be used for prediction
+   * @return RandomForestModel that can be used for prediction
    */
   def trainRegressor(
       input: RDD[LabeledPoint],
@@ -371,7 +302,7 @@ object RandomForest extends Serializable with Logging {
     require(strategy.algo == Regression,
       s"RandomForest.trainRegressor given Strategy with invalid algo: ${strategy.algo}")
     val rf = new RandomForest(strategy, numTrees, featureSubsetStrategy, seed)
-    rf.run(input)
+    rf.train(input)
   }
 
   /**
@@ -384,10 +315,11 @@ object RandomForest extends Serializable with Logging {
    *                                with k categories indexed from 0: {0, 1, ..., k-1}.
    * @param numTrees Number of trees in the random forest.
    * @param featureSubsetStrategy Number of features to consider for splits at each node.
-   *                              Supported: "auto", "all", "sqrt", "log2", "onethird".
+   *                              Supported: "auto" (default), "all", "sqrt", "log2", "onethird".
    *                              If "auto" is set, this parameter is set based on numTrees:
    *                                if numTrees == 1, set to "all";
-   *                                if numTrees > 1 (forest) set to "onethird".
+   *                                if numTrees > 1 (forest) set to "sqrt" for classification and
+   *                                  to "onethird" for regression.
    * @param impurity Criterion used for information gain calculation.
    *                 Supported values: "variance".
    * @param maxDepth Maximum depth of the tree.
@@ -396,7 +328,7 @@ object RandomForest extends Serializable with Logging {
    * @param maxBins maximum number of bins used for splitting features
    *                 (suggested value: 100)
    * @param seed  Random seed for bootstrapping and choosing feature subsets.
-   * @return a random forest model that can be used for prediction
+   * @return RandomForestModel that can be used for prediction
    */
   def trainRegressor(
       input: RDD[LabeledPoint],
@@ -450,7 +382,6 @@ object RandomForest extends Serializable with Logging {
    * @param maxMemoryUsage  Bound on size of aggregate statistics.
    * @return  (nodesForGroup, treeToNodeToIndexInfo).
    *          nodesForGroup holds the nodes to split: treeIndex --> nodes in tree.
-   *
    *          treeToNodeToIndexInfo holds indices selected features for each node:
    *            treeIndex --> (global) node index --> (node index in group, feature indices).
    *          The (global) node index is the index in the tree; the node index in group is the
@@ -516,4 +447,5 @@ object RandomForest extends Serializable with Logging {
       3 * totalBins
     }
   }
+
 }

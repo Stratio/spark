@@ -22,11 +22,10 @@ export HADOOP_HOME="<path to>/hadoop-1.0.4"
 
 Using the console
 =================
-An interactive scala console can be invoked by running `build/sbt hive/console`.
-From here you can execute queries with HiveQl and manipulate DataFrame by using DSL.
+An interactive scala console can be invoked by running `sbt/sbt hive/console`.  From here you can execute queries and inspect the various stages of query optimization.
 
 ```scala
-catalyst$ build/sbt hive/console
+catalyst$ sbt/sbt hive/console
 
 [info] Starting scala interpreter...
 import org.apache.spark.sql.catalyst.analysis._
@@ -35,28 +34,48 @@ import org.apache.spark.sql.catalyst.errors._
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules._
+import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.catalyst.util._
-import org.apache.spark.sql.Dsl._
 import org.apache.spark.sql.execution
 import org.apache.spark.sql.hive._
-import org.apache.spark.sql.hive.test.TestHive._
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.parquet.ParquetTestData
+import org.apache.spark.sql.hive.TestHive._
+Welcome to Scala version 2.10.4 (Java HotSpot(TM) 64-Bit Server VM, Java 1.7.0_45).
 Type in expressions to have them evaluated.
 Type :help for more information.
 
 scala> val query = sql("SELECT * FROM (SELECT * FROM src) a")
-query: org.apache.spark.sql.DataFrame = org.apache.spark.sql.DataFrame@74448eed
+query: org.apache.spark.sql.ExecutedQuery =
+SELECT * FROM (SELECT * FROM src) a
+=== Query Plan ===
+Project [key#6:0.0,value#7:0.1]
+ HiveTableScan [key#6,value#7], (MetastoreRelation default, src, None), None
 ```
 
-Query results are `DataFrames` and can be operated as such.
+Query results are RDDs and can be operated as such.
 ```
 scala> query.collect()
-res2: Array[org.apache.spark.sql.Row] = Array([238,val_238], [86,val_86], [311,val_311], [27,val_27]...
+res8: Array[org.apache.spark.sql.execution.Row] = Array([238,val_238], [86,val_86], [311,val_311]...
 ```
 
-You can also build further queries on top of these `DataFrames` using the query DSL.
+You can also build further queries on top of these RDDs using the query DSL.
 ```
-scala> query.where(query("key") > 30).select(avg(query("key"))).collect()
-res3: Array[org.apache.spark.sql.Row] = Array([274.79025423728814])
+scala> query.where('key === 100).toRdd.collect()
+res11: Array[org.apache.spark.sql.execution.Row] = Array([100,val_100], [100,val_100])
+```
+
+From the console you can even write rules that transform query plans.  For example, the above query has redundant project operators that aren't doing anything.  This redundancy can be eliminated using the `transform` function that is available on all [`TreeNode`](http://databricks.github.io/catalyst/latest/api/#catalyst.trees.TreeNode) objects.
+```scala
+scala> query.logicalPlan
+res1: catalyst.plans.logical.LogicalPlan = 
+Project {key#0,value#1}
+ Project {key#0,value#1}
+  MetastoreRelation default, src, None
+
+
+scala> query.logicalPlan transform {
+     |   case Project(projectList, child) if projectList == child.output => child
+     | }
+res2: catalyst.plans.logical.LogicalPlan = 
+Project {key#0,value#1}
+ MetastoreRelation default, src, None
 ```

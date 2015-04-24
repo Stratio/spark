@@ -78,5 +78,3 @@ if __name__ == "__main__":
     output = avro_rdd.map(lambda x: x[0]).collect()
     for k in output:
         print k
-
-    sc.stop()

@@ -17,9 +17,9 @@
 
 package org.apache.spark.sql.catalyst.expressions
 
-import java.sql.{Date, Timestamp}
+import java.sql.Timestamp
 
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.catalyst.types._
 
 object Literal {
   def apply(v: Any): Literal = v match {
@@ -31,24 +31,10 @@ object Literal {
     case s: Short => Literal(s, ShortType)
     case s: String => Literal(s, StringType)
     case b: Boolean => Literal(b, BooleanType)
-    case d: BigDecimal => Literal(Decimal(d), DecimalType.Unlimited)
-    case d: java.math.BigDecimal => Literal(Decimal(d), DecimalType.Unlimited)
-    case d: Decimal => Literal(d, DecimalType.Unlimited)
+    case d: BigDecimal => Literal(d, DecimalType)
     case t: Timestamp => Literal(t, TimestampType)
-    case d: Date => Literal(DateUtils.fromJavaDate(d), DateType)
     case a: Array[Byte] => Literal(a, BinaryType)
     case null => Literal(null, NullType)
-    case _ =>
-      throw new RuntimeException("Unsupported literal type " + v.getClass + " " + v)
-  }
-}
-
-/**
- * An extractor that matches non-null literal values
- */
-object NonNullLiteral {
-  def unapply(literal: Literal): Option[(Any, DataType)] = {
-    Option(literal.value).map(_ => (literal.value, literal.dataType))
   }
 }
 
@@ -64,23 +50,24 @@ object IntegerLiteral {
 
 case class Literal(value: Any, dataType: DataType) extends LeafExpression {
 
-  override def foldable: Boolean = true
-  override def nullable: Boolean = value == null
+  override def foldable = true
+  def nullable = value == null
 
-  override def toString: String = if (value != null) value.toString else "null"
+
+  override def toString = if (value != null) value.toString else "null"
 
   type EvaluatedType = Any
-  override def eval(input: Row): Any = value
+  override def eval(input: Row):Any = value
 }
 
 // TODO: Specialize
-case class MutableLiteral(var value: Any, dataType: DataType, nullable: Boolean = true)
+case class MutableLiteral(var value: Any, dataType: DataType, nullable: Boolean = true) 
     extends LeafExpression {
   type EvaluatedType = Any
 
-  def update(expression: Expression, input: Row): Unit = {
+  def update(expression: Expression, input: Row) = {
     value = expression.eval(input)
   }
 
-  override def eval(input: Row): Any = value
+  override def eval(input: Row) = value
 }

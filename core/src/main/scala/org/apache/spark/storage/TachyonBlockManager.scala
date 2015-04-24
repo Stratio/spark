@@ -148,7 +148,6 @@ private[spark] class TachyonBlockManager(
               logError("Exception while deleting tachyon spark dir: " + tachyonDir, e)
           }
         }
-        client.close()
       }
     })
   }

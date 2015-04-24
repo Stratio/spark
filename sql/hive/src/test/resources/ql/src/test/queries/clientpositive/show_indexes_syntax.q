@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 DROP TABLE show_idx_t1;
 
 CREATE TABLE show_idx_t1(KEY STRING, VALUE STRING);

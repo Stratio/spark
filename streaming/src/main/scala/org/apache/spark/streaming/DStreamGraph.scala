@@ -22,7 +22,6 @@ import java.io.{ObjectInputStream, IOException, ObjectOutputStream}
 import org.apache.spark.Logging
 import org.apache.spark.streaming.scheduler.Job
 import org.apache.spark.streaming.dstream.{DStream, ReceiverInputDStream, InputDStream}
-import org.apache.spark.util.Utils
 
 final private[streaming] class DStreamGraph extends Serializable with Logging {
 
@@ -160,16 +159,8 @@ final private[streaming] class DStreamGraph extends Serializable with Logging {
     }
   }
 
-  /**
-   * Get the maximum remember duration across all the input streams. This is a conservative but
-   * safe remember duration which can be used to perform cleanup operations.
-   */
-  def getMaxInputStreamRememberDuration(): Duration = {
-    inputStreams.map { _.rememberDuration }.maxBy { _.milliseconds }
-  }
-
   @throws(classOf[IOException])
-  private def writeObject(oos: ObjectOutputStream): Unit = Utils.tryOrIOException {
+  private def writeObject(oos: ObjectOutputStream) {
     logDebug("DStreamGraph.writeObject used")
     this.synchronized {
       checkpointInProgress = true
@@ -181,7 +172,7 @@ final private[streaming] class DStreamGraph extends Serializable with Logging {
   }
 
   @throws(classOf[IOException])
-  private def readObject(ois: ObjectInputStream): Unit = Utils.tryOrIOException {
+  private def readObject(ois: ObjectInputStream) {
     logDebug("DStreamGraph.readObject used")
     this.synchronized {
       checkpointInProgress = true

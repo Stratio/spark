@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 EXPLAIN
 SELECT
     'abc',        "abc",

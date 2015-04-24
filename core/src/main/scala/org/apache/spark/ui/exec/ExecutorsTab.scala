@@ -26,15 +26,10 @@ import org.apache.spark.storage.StorageStatusListener
 import org.apache.spark.ui.{SparkUI, SparkUITab}
 
 private[ui] class ExecutorsTab(parent: SparkUI) extends SparkUITab(parent, "executors") {
-  val listener = parent.executorsListener
-  val sc = parent.sc
-  val threadDumpEnabled =
-    sc.isDefined && parent.conf.getBoolean("spark.ui.threadDumpsEnabled", true)
+  val listener = new ExecutorsListener(parent.storageStatusListener)
 
-  attachPage(new ExecutorsPage(this, threadDumpEnabled))
-  if (threadDumpEnabled) {
-    attachPage(new ExecutorThreadDumpPage(this))
-  }
+  attachPage(new ExecutorsPage(this))
+  parent.registerListener(listener)
 }
 
 /**
@@ -48,29 +43,20 @@ class ExecutorsListener(storageStatusListener: StorageStatusListener) extends Sp
   val executorToTasksFailed = HashMap[String, Int]()
   val executorToDuration = HashMap[String, Long]()
   val executorToInputBytes = HashMap[String, Long]()
-  val executorToInputRecords = HashMap[String, Long]()
-  val executorToOutputBytes = HashMap[String, Long]()
-  val executorToOutputRecords = HashMap[String, Long]()
   val executorToShuffleRead = HashMap[String, Long]()
   val executorToShuffleWrite = HashMap[String, Long]()
-  val executorToLogUrls = HashMap[String, Map[String, String]]()
 
   def storageStatusList = storageStatusListener.storageStatusList
 
-  override def onExecutorAdded(executorAdded: SparkListenerExecutorAdded) = synchronized {
-    val eid = executorAdded.executorId
-    executorToLogUrls(eid) = executorAdded.executorInfo.logUrlMap
-  }
-
   override def onTaskStart(taskStart: SparkListenerTaskStart) = synchronized {
-    val eid = taskStart.taskInfo.executorId
+    val eid = formatExecutorId(taskStart.taskInfo.executorId)
     executorToTasksActive(eid) = executorToTasksActive.getOrElse(eid, 0) + 1
   }
 
   override def onTaskEnd(taskEnd: SparkListenerTaskEnd) = synchronized {
     val info = taskEnd.taskInfo
     if (info != null) {
-      val eid = info.executorId
+      val eid = formatExecutorId(info.executorId)
       executorToTasksActive(eid) = executorToTasksActive.getOrElse(eid, 1) - 1
       executorToDuration(eid) = executorToDuration.getOrElse(eid, 0L) + info.duration
       taskEnd.reason match {
@@ -86,14 +72,6 @@ class ExecutorsListener(storageStatusListener: StorageStatusListener) extends Sp
         metrics.inputMetrics.foreach { inputMetrics =>
           executorToInputBytes(eid) =
             executorToInputBytes.getOrElse(eid, 0L) + inputMetrics.bytesRead
-          executorToInputRecords(eid) =
-            executorToInputRecords.getOrElse(eid, 0L) + inputMetrics.recordsRead
-        }
-        metrics.outputMetrics.foreach { outputMetrics =>
-          executorToOutputBytes(eid) =
-            executorToOutputBytes.getOrElse(eid, 0L) + outputMetrics.bytesWritten
-          executorToOutputRecords(eid) =
-            executorToOutputRecords.getOrElse(eid, 0L) + outputMetrics.recordsWritten
         }
         metrics.shuffleReadMetrics.foreach { shuffleRead =>
           executorToShuffleRead(eid) =
@@ -107,4 +85,6 @@ class ExecutorsListener(storageStatusListener: StorageStatusListener) extends Sp
     }
   }
 
+  // This addresses executor ID inconsistencies in the local mode
+  private def formatExecutorId(execId: String) = storageStatusListener.formatExecutorId(execId)
 }

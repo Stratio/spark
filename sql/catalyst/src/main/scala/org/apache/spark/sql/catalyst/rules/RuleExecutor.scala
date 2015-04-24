@@ -79,8 +79,7 @@ abstract class RuleExecutor[TreeType <: TreeNode[_]] extends Logging {
         }
 
         if (curPlan.fastEquals(lastPlan)) {
-          logTrace(
-            s"Fixed point reached for batch ${batch.name} after ${iteration - 1} iterations.")
+          logTrace(s"Fixed point reached for batch ${batch.name} after $iteration iterations.")
           continue = false
         }
         lastPlan = curPlan

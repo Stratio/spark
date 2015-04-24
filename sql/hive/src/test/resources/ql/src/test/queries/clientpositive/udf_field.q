@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION field;
 DESCRIBE FUNCTION EXTENDED field;
 
@@ -7,7 +5,7 @@ SELECT
   field("x", "a", "b", "c", "d"),
   field(NULL, "a", "b", "c", "d"),
   field(0, 1, 2, 3, 4)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT
   field("a", "a", "b", "c", "d"),
@@ -15,7 +13,7 @@ SELECT
   field("c", "a", "b", "c", "d"),
   field("d", "a", "b", "c", "d"),
   field("d", "a", "b", NULL, "d")
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 SELECT
   field(1, 1, 2, 3, 4),
@@ -23,11 +21,11 @@ SELECT
   field(3, 1, 2, 3, 4),
   field(4, 1, 2, 3, 4),
   field(4, 1, 2, NULL, 4)
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;
 
 
 CREATE TABLE test_table(col1 STRING, col2 STRING) STORED AS TEXTFILE;
-LOAD DATA LOCAL INPATH '../../data/files/kv1.txt' INTO TABLE test_table;
+LOAD DATA LOCAL INPATH '../data/files/kv1.txt' INTO TABLE test_table;
 
 select col1,col2,
   field("66",col1),
@@ -44,7 +42,7 @@ from test_table where col1="86" or col1="66";
 
 
 CREATE TABLE test_table1(col1 int, col2 string) STORED AS TEXTFILE;
-LOAD DATA LOCAL INPATH '../../data/files/kv1.txt' INTO TABLE test_table1;
+LOAD DATA LOCAL INPATH '../data/files/kv1.txt' INTO TABLE test_table1;
 
 select col1,col2,
   field(66,col1),

@@ -1,4 +1,3 @@
-set hive.fetch.task.conversion=more;
 
 -- casting from null should yield null
 select

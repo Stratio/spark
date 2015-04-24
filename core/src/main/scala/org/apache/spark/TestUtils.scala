@@ -17,17 +17,14 @@
 
 package org.apache.spark
 
-import java.io.{ByteArrayInputStream, File, FileInputStream, FileOutputStream}
+import java.io.{File, FileInputStream, FileOutputStream}
 import java.net.{URI, URL}
 import java.util.jar.{JarEntry, JarOutputStream}
 
 import scala.collection.JavaConversions._
 
-import com.google.common.base.Charsets.UTF_8
-import com.google.common.io.{ByteStreams, Files}
 import javax.tools.{JavaFileObject, SimpleJavaFileObject, ToolProvider}
-
-import org.apache.spark.util.Utils
+import com.google.common.io.Files
 
 /**
  * Utilities for tests. Included in main codebase since it's used by multiple
@@ -44,38 +41,14 @@ private[spark] object TestUtils {
    * Note: if this is used during class loader tests, class names should be unique
    * in order to avoid interference between tests.
    */
-  def createJarWithClasses(
-      classNames: Seq[String],
-      toStringValue: String = "",
-      classNamesWithBase: Seq[(String, String)] = Seq(),
-      classpathUrls: Seq[URL] = Seq()): URL = {
-    val tempDir = Utils.createTempDir()
-    val files1 = for (name <- classNames) yield {
-      createCompiledClass(name, tempDir, toStringValue, classpathUrls = classpathUrls) 
-    }
-    val files2 = for ((childName, baseName) <- classNamesWithBase) yield {
-      createCompiledClass(childName, tempDir, toStringValue, baseName, classpathUrls)
-    }
+  def createJarWithClasses(classNames: Seq[String], value: String = ""): URL = {
+    val tempDir = Files.createTempDir()
+    tempDir.deleteOnExit()
+    val files = for (name <- classNames) yield createCompiledClass(name, tempDir, value)
     val jarFile = new File(tempDir, "testJar-%s.jar".format(System.currentTimeMillis()))
-    createJar(files1 ++ files2, jarFile)
+    createJar(files, jarFile)
   }
 
-  /**
-   * Create a jar file containing multiple files. The `files` map contains a mapping of
-   * file names in the jar file to their contents.
-   */
-  def createJarWithFiles(files: Map[String, String], dir: File = null): URL = {
-    val tempDir = Option(dir).getOrElse(Utils.createTempDir())
-    val jarFile = File.createTempFile("testJar", ".jar", tempDir)
-    val jarStream = new JarOutputStream(new FileOutputStream(jarFile))
-    files.foreach { case (k, v) =>
-      val entry = new JarEntry(k)
-      jarStream.putNextEntry(entry)
-      ByteStreams.copy(new ByteArrayInputStream(v.getBytes(UTF_8)), jarStream)
-    }
-    jarStream.close()
-    jarFile.toURI.toURL
-  }
 
   /**
    * Create a jar file that contains this set of files. All files will be located at the root
@@ -90,7 +63,12 @@ private[spark] object TestUtils {
       jarStream.putNextEntry(jarEntry)
 
       val in = new FileInputStream(file)
-      ByteStreams.copy(in, jarStream)
+      val buffer = new Array[Byte](10240)
+      var nRead = 0
+      while (nRead <= 0) {
+        nRead = in.read(buffer, 0, buffer.length)
+        jarStream.write(buffer, 0, nRead)
+      }
       in.close()
     }
     jarStream.close()
@@ -111,26 +89,15 @@ private[spark] object TestUtils {
   }
 
   /** Creates a compiled class with the given name. Class file will be placed in destDir. */
-  def createCompiledClass(
-      className: String,
-      destDir: File,
-      toStringValue: String = "",
-      baseClass: String = null,
-      classpathUrls: Seq[URL] = Seq()): File = {
+  def createCompiledClass(className: String, destDir: File, value: String = ""): File = {
     val compiler = ToolProvider.getSystemJavaCompiler
-    val extendsText = Option(baseClass).map { c => s" extends ${c}" }.getOrElse("")
     val sourceFile = new JavaSourceFromString(className,
-      "public class " + className + extendsText + " implements java.io.Serializable {" +
-      "  @Override public String toString() { return \"" + toStringValue + "\"; }}")
+      "public class " + className + " implements java.io.Serializable {" +
+      "  @Override public String toString() { return \"" + value + "\"; }}")
 
     // Calling this outputs a class file in pwd. It's easier to just rename the file than
     // build a custom FileManager that controls the output location.
-    val options = if (classpathUrls.nonEmpty) {
-      Seq("-classpath", classpathUrls.map { _.getFile }.mkString(File.pathSeparator))
-    } else {
-      Seq()
-    }
-    compiler.getTask(null, null, null, options, null, Seq(sourceFile)).call()
+    compiler.getTask(null, null, null, null, null, Seq(sourceFile)).call()
 
     val fileName = className + ".class"
     val result = new File(fileName)

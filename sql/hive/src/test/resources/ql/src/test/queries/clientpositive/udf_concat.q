@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION concat;
 DESCRIBE FUNCTION EXTENDED concat;
 
@@ -14,10 +12,4 @@ SELECT
   concat(1, 2),
   concat(1),
   concat('1234', 'abc', 'extra argument')
-FROM src tablesample (1 rows);
-
--- binary/mixed
-SELECT
-  concat(cast('ab' as binary), cast('cd' as binary)),
-  concat('ab', cast('cd' as binary))
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

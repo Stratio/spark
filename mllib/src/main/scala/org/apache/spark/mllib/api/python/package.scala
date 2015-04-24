@@ -18,7 +18,7 @@
 package org.apache.spark.mllib.api
 
 /**
- * Internal support for MLlib Python API.
+ * Internal support for MLLib Python API.
  *
  * @see [[org.apache.spark.mllib.api.python.PythonMLLibAPI]]
  */

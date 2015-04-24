@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION isnull;
 DESCRIBE FUNCTION EXTENDED isnull;
 

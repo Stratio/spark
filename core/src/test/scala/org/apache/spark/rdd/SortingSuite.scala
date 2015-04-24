@@ -21,6 +21,7 @@ import org.scalatest.FunSuite
 import org.scalatest.Matchers
 
 import org.apache.spark.{Logging, SharedSparkContext}
+import org.apache.spark.SparkContext._
 
 class SortingSuite extends FunSuite with SharedSparkContext with Matchers with Logging {
 

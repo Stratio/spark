@@ -17,8 +17,6 @@
 
 package org.apache.spark.util.collection
 
-import scala.reflect.ClassTag
-
 /**
  * An append-only buffer similar to ArrayBuffer, but more memory-efficient for small buffers.
  * ArrayBuffer always allocates an Object array to store the data, with 16 entries by default,
@@ -27,7 +25,7 @@ import scala.reflect.ClassTag
  * entries than that. This makes it more efficient for operations like groupBy where we expect
  * some keys to have very few elements.
  */
-private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable {
+private[spark] class CompactBuffer[T] extends Seq[T] with Serializable {
   // First two elements
   private var element0: T = _
   private var element1: T = _
@@ -36,7 +34,7 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
   private var curSize = 0
 
   // Array for extra elements
-  private var otherElements: Array[T] = null
+  private var otherElements: Array[AnyRef] = null
 
   def apply(position: Int): T = {
     if (position < 0 || position >= curSize) {
@@ -47,7 +45,7 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
     } else if (position == 1) {
       element1
     } else {
-      otherElements(position - 2)
+      otherElements(position - 2).asInstanceOf[T]
     }
   }
 
@@ -60,7 +58,7 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
     } else if (position == 1) {
       element1 = value
     } else {
-      otherElements(position - 2) = value
+      otherElements(position - 2) = value.asInstanceOf[AnyRef]
     }
   }
 
@@ -74,7 +72,7 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
       curSize = 2
     } else {
       growToSize(curSize + 1)
-      otherElements(newIndex - 2) = value
+      otherElements(newIndex - 2) = value.asInstanceOf[AnyRef]
     }
     this
   }
@@ -141,7 +139,7 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
           newArrayLen = Int.MaxValue - 2
         }
       }
-      val newArray = new Array[T](newArrayLen)
+      val newArray = new Array[AnyRef](newArrayLen)
       if (otherElements != null) {
         System.arraycopy(otherElements, 0, newArray, 0, otherElements.length)
       }
@@ -152,9 +150,9 @@ private[spark] class CompactBuffer[T: ClassTag] extends Seq[T] with Serializable
 }
 
 private[spark] object CompactBuffer {
-  def apply[T: ClassTag](): CompactBuffer[T] = new CompactBuffer[T]
+  def apply[T](): CompactBuffer[T] = new CompactBuffer[T]
 
-  def apply[T: ClassTag](value: T): CompactBuffer[T] = {
+  def apply[T](value: T): CompactBuffer[T] = {
     val buf = new CompactBuffer[T]
     buf += value
   }

@@ -20,17 +20,17 @@ import java.nio.ByteBuffer
 
 import scala.collection.JavaConversions.seqAsJavaList
 
+import org.apache.spark.annotation.Experimental
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.Milliseconds
 import org.apache.spark.streaming.Seconds
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.TestSuiteBase
-import org.apache.spark.util.{ManualClock, Clock}
-
-import org.mockito.Mockito._
+import org.apache.spark.streaming.util.Clock
+import org.apache.spark.streaming.util.ManualClock
 import org.scalatest.BeforeAndAfter
 import org.scalatest.Matchers
-import org.scalatest.mock.MockitoSugar
+import org.scalatest.mock.EasyMockSugar
 
 import com.amazonaws.services.kinesis.clientlibrary.exceptions.InvalidStateException
 import com.amazonaws.services.kinesis.clientlibrary.exceptions.KinesisClientLibDependencyException
@@ -42,10 +42,10 @@ import com.amazonaws.services.kinesis.clientlibrary.types.ShutdownReason
 import com.amazonaws.services.kinesis.model.Record
 
 /**
- * Suite of Kinesis streaming receiver tests focusing mostly on the KinesisRecordProcessor
+ *  Suite of Kinesis streaming receiver tests focusing mostly on the KinesisRecordProcessor 
  */
 class KinesisReceiverSuite extends TestSuiteBase with Matchers with BeforeAndAfter
-    with MockitoSugar {
+    with EasyMockSugar {
 
   val app = "TestKinesisReceiver"
   val stream = "mySparkStream"
@@ -73,14 +73,6 @@ class KinesisReceiverSuite extends TestSuiteBase with Matchers with BeforeAndAft
     currentClockMock = mock[Clock]
   }
 
-  override def afterFunction(): Unit = {
-    super.afterFunction()
-    // Since this suite was originally written using EasyMock, add this to preserve the old
-    // mocking semantics (see SPARK-5735 for more details)
-    verifyNoMoreInteractions(receiverMock, checkpointerMock, checkpointClockMock,
-      checkpointStateMock, currentClockMock)
-  }
-
   test("kinesis utils api") {
     val ssc = new StreamingContext(master, framework, batchDuration)
     // Tests the API, does not actually test data receiving
@@ -91,175 +83,193 @@ class KinesisReceiverSuite extends TestSuiteBase with Matchers with BeforeAndAft
   }
 
   test("process records including store and checkpoint") {
-    when(receiverMock.isStopped()).thenReturn(false)
-    when(checkpointStateMock.shouldCheckpoint()).thenReturn(true)
-
-    val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, checkpointStateMock)
-    recordProcessor.processRecords(batch, checkpointerMock)
-
-    verify(receiverMock, times(1)).isStopped()
-    verify(receiverMock, times(1)).store(record1.getData().array())
-    verify(receiverMock, times(1)).store(record2.getData().array())
-    verify(checkpointStateMock, times(1)).shouldCheckpoint()
-    verify(checkpointerMock, times(1)).checkpoint()
-    verify(checkpointStateMock, times(1)).advanceCheckpoint()
+    val expectedCheckpointIntervalMillis = 10
+    expecting {
+      receiverMock.isStopped().andReturn(false).once()
+      receiverMock.store(record1.getData().array()).once()
+      receiverMock.store(record2.getData().array()).once()
+      checkpointStateMock.shouldCheckpoint().andReturn(true).once()
+      checkpointerMock.checkpoint().once()
+      checkpointStateMock.advanceCheckpoint().once()
+    }
+    whenExecuting(receiverMock, checkpointerMock, checkpointStateMock) {
+      val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId,
+          checkpointStateMock)
+      recordProcessor.processRecords(batch, checkpointerMock)
+    }
   }
 
   test("shouldn't store and checkpoint when receiver is stopped") {
-    when(receiverMock.isStopped()).thenReturn(true)
-
-    val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, checkpointStateMock)
-    recordProcessor.processRecords(batch, checkpointerMock)
-
-    verify(receiverMock, times(1)).isStopped()
+    expecting {
+      receiverMock.isStopped().andReturn(true).once()
+    }
+    whenExecuting(receiverMock, checkpointerMock, checkpointStateMock) {
+      val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId,
+          checkpointStateMock)
+      recordProcessor.processRecords(batch, checkpointerMock)
+    }
   }
 
   test("shouldn't checkpoint when exception occurs during store") {
-    when(receiverMock.isStopped()).thenReturn(false)
-    when(receiverMock.store(record1.getData().array())).thenThrow(new RuntimeException())
-
-    intercept[RuntimeException] {
-      val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, checkpointStateMock)
-      recordProcessor.processRecords(batch, checkpointerMock)
+    expecting {
+      receiverMock.isStopped().andReturn(false).once()
+      receiverMock.store(record1.getData().array()).andThrow(new RuntimeException()).once()
     }
-
-    verify(receiverMock, times(1)).isStopped()
-    verify(receiverMock, times(1)).store(record1.getData().array())
+    whenExecuting(receiverMock, checkpointerMock, checkpointStateMock) {
+      intercept[RuntimeException] {
+        val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId,
+            checkpointStateMock)
+        recordProcessor.processRecords(batch, checkpointerMock)
+      }
+    }
   }
 
   test("should set checkpoint time to currentTime + checkpoint interval upon instantiation") {
-    when(currentClockMock.getTimeMillis()).thenReturn(0)
-
+    expecting {
+      currentClockMock.currentTime().andReturn(0).once()
+    }
+    whenExecuting(currentClockMock) {
     val checkpointIntervalMillis = 10
-    val checkpointState =
-      new KinesisCheckpointState(Milliseconds(checkpointIntervalMillis), currentClockMock)
-    assert(checkpointState.checkpointClock.getTimeMillis() == checkpointIntervalMillis)
-
-    verify(currentClockMock, times(1)).getTimeMillis()
+    val checkpointState = new KinesisCheckpointState(Milliseconds(checkpointIntervalMillis), currentClockMock)
+    assert(checkpointState.checkpointClock.currentTime() == checkpointIntervalMillis)
+    }
   }
 
   test("should checkpoint if we have exceeded the checkpoint interval") {
-    when(currentClockMock.getTimeMillis()).thenReturn(0)
-
-    val checkpointState = new KinesisCheckpointState(Milliseconds(Long.MinValue), currentClockMock)
-    assert(checkpointState.shouldCheckpoint())
-
-    verify(currentClockMock, times(1)).getTimeMillis()
+    expecting {
+      currentClockMock.currentTime().andReturn(0).once()
+    }
+    whenExecuting(currentClockMock) {
+      val checkpointState = new KinesisCheckpointState(Milliseconds(Long.MinValue), currentClockMock)
+      assert(checkpointState.shouldCheckpoint())
+    }
   }
 
   test("shouldn't checkpoint if we have not exceeded the checkpoint interval") {
-    when(currentClockMock.getTimeMillis()).thenReturn(0)
-
-    val checkpointState = new KinesisCheckpointState(Milliseconds(Long.MaxValue), currentClockMock)
-    assert(!checkpointState.shouldCheckpoint())
-
-    verify(currentClockMock, times(1)).getTimeMillis()
+    expecting {
+      currentClockMock.currentTime().andReturn(0).once()
+    }
+    whenExecuting(currentClockMock) {
+      val checkpointState = new KinesisCheckpointState(Milliseconds(Long.MaxValue), currentClockMock)
+      assert(!checkpointState.shouldCheckpoint())
+    }
   }
 
   test("should add to time when advancing checkpoint") {
-    when(currentClockMock.getTimeMillis()).thenReturn(0)
-
-    val checkpointIntervalMillis = 10
-    val checkpointState =
-      new KinesisCheckpointState(Milliseconds(checkpointIntervalMillis), currentClockMock)
-    assert(checkpointState.checkpointClock.getTimeMillis() == checkpointIntervalMillis)
-    checkpointState.advanceCheckpoint()
-    assert(checkpointState.checkpointClock.getTimeMillis() == (2 * checkpointIntervalMillis))
-
-    verify(currentClockMock, times(1)).getTimeMillis()
+    expecting {
+      currentClockMock.currentTime().andReturn(0).once()
+    }
+    whenExecuting(currentClockMock) {
+      val checkpointIntervalMillis = 10
+      val checkpointState = new KinesisCheckpointState(Milliseconds(checkpointIntervalMillis), currentClockMock)
+      assert(checkpointState.checkpointClock.currentTime() == checkpointIntervalMillis)
+      checkpointState.advanceCheckpoint()
+      assert(checkpointState.checkpointClock.currentTime() == (2 * checkpointIntervalMillis))
+    }
   }
 
   test("shutdown should checkpoint if the reason is TERMINATE") {
-    val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, checkpointStateMock)
-    val reason = ShutdownReason.TERMINATE
-    recordProcessor.shutdown(checkpointerMock, reason)
-
-    verify(checkpointerMock, times(1)).checkpoint()
+    expecting {
+      checkpointerMock.checkpoint().once()
+    }
+    whenExecuting(checkpointerMock, checkpointStateMock) {
+      val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, 
+          checkpointStateMock)
+      val reason = ShutdownReason.TERMINATE
+      recordProcessor.shutdown(checkpointerMock, reason)
+    }
   }
 
   test("shutdown should not checkpoint if the reason is something other than TERMINATE") {
-    val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, checkpointStateMock)
-    recordProcessor.shutdown(checkpointerMock, ShutdownReason.ZOMBIE)
-    recordProcessor.shutdown(checkpointerMock, null)
-
-    verify(checkpointerMock, never()).checkpoint()
+    expecting {
+    }
+    whenExecuting(checkpointerMock, checkpointStateMock) {
+      val recordProcessor = new KinesisRecordProcessor(receiverMock, workerId, 
+          checkpointStateMock)
+      recordProcessor.shutdown(checkpointerMock, ShutdownReason.ZOMBIE)
+      recordProcessor.shutdown(checkpointerMock, null)
+    }
   }
 
   test("retry success on first attempt") {
     val expectedIsStopped = false
-    when(receiverMock.isStopped()).thenReturn(expectedIsStopped)
-
-    val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
-    assert(actualVal == expectedIsStopped)
-
-    verify(receiverMock, times(1)).isStopped()
+    expecting {
+      receiverMock.isStopped().andReturn(expectedIsStopped).once()
+    }
+    whenExecuting(receiverMock) {
+      val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
+      assert(actualVal == expectedIsStopped)
+    }
   }
 
   test("retry success on second attempt after a Kinesis throttling exception") {
     val expectedIsStopped = false
-    when(receiverMock.isStopped())
-        .thenThrow(new ThrottlingException("error message"))
-        .thenReturn(expectedIsStopped)
-
-    val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
-    assert(actualVal == expectedIsStopped)
-
-    verify(receiverMock, times(2)).isStopped()
+    expecting {
+      receiverMock.isStopped().andThrow(new ThrottlingException("error message"))
+        .andReturn(expectedIsStopped).once()
+    }
+    whenExecuting(receiverMock) {
+      val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
+      assert(actualVal == expectedIsStopped)
+    }
   }
 
   test("retry success on second attempt after a Kinesis dependency exception") {
     val expectedIsStopped = false
-    when(receiverMock.isStopped())
-        .thenThrow(new KinesisClientLibDependencyException("error message"))
-        .thenReturn(expectedIsStopped)
-
-    val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
-    assert(actualVal == expectedIsStopped)
-
-    verify(receiverMock, times(2)).isStopped()
+    expecting {
+      receiverMock.isStopped().andThrow(new KinesisClientLibDependencyException("error message"))
+        .andReturn(expectedIsStopped).once()
+    }
+    whenExecuting(receiverMock) {
+      val actualVal = KinesisRecordProcessor.retryRandom(receiverMock.isStopped(), 2, 100)
+      assert(actualVal == expectedIsStopped)
+    }
   }
 
   test("retry failed after a shutdown exception") {
-    when(checkpointerMock.checkpoint()).thenThrow(new ShutdownException("error message"))
-
-    intercept[ShutdownException] {
-      KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+    expecting {
+      checkpointerMock.checkpoint().andThrow(new ShutdownException("error message")).once()
     }
-
-    verify(checkpointerMock, times(1)).checkpoint()
+    whenExecuting(checkpointerMock) {
+      intercept[ShutdownException] {
+        KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+      }
+    }
   }
 
   test("retry failed after an invalid state exception") {
-    when(checkpointerMock.checkpoint()).thenThrow(new InvalidStateException("error message"))
-
-    intercept[InvalidStateException] {
-      KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+    expecting {
+      checkpointerMock.checkpoint().andThrow(new InvalidStateException("error message")).once()
     }
-
-    verify(checkpointerMock, times(1)).checkpoint()
+    whenExecuting(checkpointerMock) {
+      intercept[InvalidStateException] {
+        KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+      }
+    }
   }
 
   test("retry failed after unexpected exception") {
-    when(checkpointerMock.checkpoint()).thenThrow(new RuntimeException("error message"))
-
-    intercept[RuntimeException] {
-      KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+    expecting {
+      checkpointerMock.checkpoint().andThrow(new RuntimeException("error message")).once()
     }
-
-    verify(checkpointerMock, times(1)).checkpoint()
+    whenExecuting(checkpointerMock) {
+      intercept[RuntimeException] {
+        KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+      }
+    }
   }
 
   test("retry failed after exhausing all retries") {
     val expectedErrorMessage = "final try error message"
-    when(checkpointerMock.checkpoint())
-        .thenThrow(new ThrottlingException("error message"))
-        .thenThrow(new ThrottlingException(expectedErrorMessage))
-
-    val exception = intercept[RuntimeException] {
-      KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+    expecting {
+      checkpointerMock.checkpoint().andThrow(new ThrottlingException("error message"))
+        .andThrow(new ThrottlingException(expectedErrorMessage)).once()
     }
-    exception.getMessage().shouldBe(expectedErrorMessage)
-
-    verify(checkpointerMock, times(2)).checkpoint()
+    whenExecuting(checkpointerMock) {
+      val exception = intercept[RuntimeException] {
+        KinesisRecordProcessor.retryRandom(checkpointerMock.checkpoint(), 2, 100)
+      }
+      exception.getMessage().shouldBe(expectedErrorMessage)
+    }
   }
 }

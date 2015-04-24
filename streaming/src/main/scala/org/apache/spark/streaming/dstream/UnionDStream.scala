@@ -28,10 +28,17 @@ private[streaming]
 class UnionDStream[T: ClassTag](parents: Array[DStream[T]])
   extends DStream[T](parents.head.ssc) {
 
-  require(parents.length > 0, "List of DStreams to union is empty")
-  require(parents.map(_.ssc).distinct.size == 1, "Some of the DStreams have different contexts")
-  require(parents.map(_.slideDuration).distinct.size == 1,
-    "Some of the DStreams have different slide durations")
+  if (parents.length == 0) {
+    throw new IllegalArgumentException("Empty array of parents")
+  }
+
+  if (parents.map(_.ssc).distinct.size > 1) {
+    throw new IllegalArgumentException("Array of parents have different StreamingContexts")
+  }
+
+  if (parents.map(_.slideDuration).distinct.size > 1) {
+    throw new IllegalArgumentException("Array of parents have different slide times")
+  }
 
   override def dependencies = parents.toList
 

@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION like;
 DESCRIBE FUNCTION EXTENDED like;
 
@@ -20,4 +18,4 @@ SELECT '1+2' LIKE '_+_',
        '112' LIKE '1+_',
        '|||' LIKE '|_|', 
        '+++' LIKE '1+_' 
-FROM src tablesample (1 rows);
+FROM src LIMIT 1;

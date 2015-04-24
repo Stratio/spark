@@ -65,11 +65,10 @@ class JdbcRDDSuite extends FunSuite with BeforeAndAfter with LocalSparkContext {
 
   after {
     try {
-      DriverManager.getConnection("jdbc:derby:target/JdbcRDDSuiteDb;shutdown=true")
+      DriverManager.getConnection("jdbc:derby:;shutdown=true")
     } catch {
-      case se: SQLException if se.getSQLState == "08006" =>
-        // Normal single database shutdown
-        // https://db.apache.org/derby/docs/10.2/ref/rrefexcept71493.html
+      case se: SQLException if se.getSQLState == "XJ015" =>
+        // normal shutdown
     }
   }
 }

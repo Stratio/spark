@@ -18,7 +18,7 @@
 package org.apache.spark.examples.graphx
 
 import org.apache.spark.SparkContext._
-import org.apache.spark.graphx.{GraphXUtils, PartitionStrategy}
+import org.apache.spark.graphx.PartitionStrategy
 import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.spark.graphx.util.GraphGenerators
 import java.io.{PrintWriter, FileOutputStream}
@@ -67,7 +67,7 @@ object SynthBenchmark {
 
     options.foreach {
       case ("app", v) => app = v
-      case ("niters", v) => niter = v.toInt
+      case ("niter", v) => niter = v.toInt
       case ("nverts", v) => numVertices = v.toInt
       case ("numEPart", v) => numEPart = Some(v.toInt)
       case ("partStrategy", v) => partitionStrategy = Some(PartitionStrategy.fromString(v))
@@ -80,7 +80,8 @@ object SynthBenchmark {
 
     val conf = new SparkConf()
       .setAppName(s"GraphX Synth Benchmark (nverts = $numVertices, app = $app)")
-    GraphXUtils.registerKryoClasses(conf)
+      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .set("spark.kryo.registrator", "org.apache.spark.graphx.GraphKryoRegistrator")
 
     val sc = new SparkContext(conf)
 

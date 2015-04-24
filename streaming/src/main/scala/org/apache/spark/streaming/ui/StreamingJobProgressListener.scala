@@ -25,6 +25,7 @@ import org.apache.spark.streaming.scheduler.StreamingListenerBatchStarted
 import org.apache.spark.streaming.scheduler.BatchInfo
 import org.apache.spark.streaming.scheduler.StreamingListenerBatchSubmitted
 import org.apache.spark.util.Distribution
+import org.apache.spark.Logging
 
 
 private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
@@ -32,11 +33,9 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
 
   private val waitingBatchInfos = new HashMap[Time, BatchInfo]
   private val runningBatchInfos = new HashMap[Time, BatchInfo]
-  private val completedBatchInfos = new Queue[BatchInfo]
+  private val completedaBatchInfos = new Queue[BatchInfo]
   private val batchInfoLimit = ssc.conf.getInt("spark.streaming.ui.retainedBatches", 100)
   private var totalCompletedBatches = 0L
-  private var totalReceivedRecords = 0L
-  private var totalProcessedRecords = 0L
   private val receiverInfos = new HashMap[Int, ReceiverInfo]
 
   val batchDuration = ssc.graph.batchDuration.milliseconds
@@ -60,28 +59,20 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
   }
 
   override def onBatchSubmitted(batchSubmitted: StreamingListenerBatchSubmitted) = synchronized {
-    waitingBatchInfos(batchSubmitted.batchInfo.batchTime) = batchSubmitted.batchInfo
+    runningBatchInfos(batchSubmitted.batchInfo.batchTime) = batchSubmitted.batchInfo
   }
 
   override def onBatchStarted(batchStarted: StreamingListenerBatchStarted) = synchronized {
     runningBatchInfos(batchStarted.batchInfo.batchTime) = batchStarted.batchInfo
     waitingBatchInfos.remove(batchStarted.batchInfo.batchTime)
-
-    batchStarted.batchInfo.receivedBlockInfo.foreach { case (_, infos) =>
-      totalReceivedRecords += infos.map(_.numRecords).sum
-    }
   }
 
   override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted) = synchronized {
     waitingBatchInfos.remove(batchCompleted.batchInfo.batchTime)
     runningBatchInfos.remove(batchCompleted.batchInfo.batchTime)
-    completedBatchInfos.enqueue(batchCompleted.batchInfo)
-    if (completedBatchInfos.size > batchInfoLimit) completedBatchInfos.dequeue()
+    completedaBatchInfos.enqueue(batchCompleted.batchInfo)
+    if (completedaBatchInfos.size > batchInfoLimit) completedaBatchInfos.dequeue()
     totalCompletedBatches += 1L
-
-    batchCompleted.batchInfo.receivedBlockInfo.foreach { case (_, infos) =>
-      totalProcessedRecords += infos.map(_.numRecords).sum
-    }
   }
 
   def numReceivers = synchronized {
@@ -90,14 +81,6 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
 
   def numTotalCompletedBatches: Long = synchronized {
     totalCompletedBatches
-  }
-
-  def numTotalReceivedRecords: Long = synchronized {
-    totalReceivedRecords
-  }
-
-  def numTotalProcessedRecords: Long = synchronized {
-    totalProcessedRecords
   }
 
   def numUnprocessedBatches: Long = synchronized {
@@ -113,7 +96,7 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
   }
 
   def retainedCompletedBatches: Seq[BatchInfo] = synchronized {
-    completedBatchInfos.toSeq
+    completedaBatchInfos.toSeq
   }
 
   def processingDelayDistribution: Option[Distribution] = synchronized {
@@ -144,7 +127,7 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
     }.toMap
   }
 
-  def lastReceivedBatchRecords: Map[Int, Long] = synchronized {
+  def lastReceivedBatchRecords: Map[Int, Long] = {
     val lastReceivedBlockInfoOption = lastReceivedBatch.map(_.receivedBlockInfo)
     lastReceivedBlockInfoOption.map { lastReceivedBlockInfo =>
       (0 until numReceivers).map { receiverId =>
@@ -155,24 +138,24 @@ private[streaming] class StreamingJobProgressListener(ssc: StreamingContext)
     }
   }
 
-  def receiverInfo(receiverId: Int): Option[ReceiverInfo] = synchronized {
+  def receiverInfo(receiverId: Int): Option[ReceiverInfo] = {
     receiverInfos.get(receiverId)
   }
 
-  def lastCompletedBatch: Option[BatchInfo] = synchronized {
-    completedBatchInfos.sortBy(_.batchTime)(Time.ordering).lastOption
+  def lastCompletedBatch: Option[BatchInfo] = {
+    completedaBatchInfos.sortBy(_.batchTime)(Time.ordering).lastOption
   }
 
-  def lastReceivedBatch: Option[BatchInfo] = synchronized {
+  def lastReceivedBatch: Option[BatchInfo] = {
     retainedBatches.lastOption
   }
 
-  private def retainedBatches: Seq[BatchInfo] = {
+  private def retainedBatches: Seq[BatchInfo] = synchronized {
     (waitingBatchInfos.values.toSeq ++
-      runningBatchInfos.values.toSeq ++ completedBatchInfos).sortBy(_.batchTime)(Time.ordering)
+      runningBatchInfos.values.toSeq ++ completedaBatchInfos).sortBy(_.batchTime)(Time.ordering)
   }
 
   private def extractDistribution(getMetric: BatchInfo => Option[Long]): Option[Distribution] = {
-    Distribution(completedBatchInfos.flatMap(getMetric(_)).map(_.toDouble))
+    Distribution(completedaBatchInfos.flatMap(getMetric(_)).map(_.toDouble))
   }
 }

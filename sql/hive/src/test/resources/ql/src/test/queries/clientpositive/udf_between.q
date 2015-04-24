@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 describe function between;
 describe function extended between;
 

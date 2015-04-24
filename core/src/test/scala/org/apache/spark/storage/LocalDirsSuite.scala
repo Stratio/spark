@@ -49,7 +49,7 @@ class LocalDirsSuite extends FunSuite {
       }
 
       override def clone: SparkConf = {
-        new MySparkConf().setAll(getAll)
+        new MySparkConf().setAll(settings)
       }
     }
     // spark.local.dir only contains invalid directories, but that's not a problem since

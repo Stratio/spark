@@ -17,7 +17,7 @@
 
 package org.apache.spark.storage
 
-import java.io.{IOException, File, FileOutputStream, RandomAccessFile}
+import java.io.{File, FileOutputStream, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel.MapMode
 
@@ -31,8 +31,7 @@ import org.apache.spark.util.Utils
 private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBlockManager)
   extends BlockStore(blockManager) with Logging {
 
-  val minMemoryMapBytes = blockManager.conf.getLong(
-    "spark.storage.memoryMapThreshold", 2 * 1024L * 1024L)
+  val minMemoryMapBytes = blockManager.conf.getLong("spark.storage.memoryMapThreshold", 2 * 4096L)
 
   override def getSize(blockId: BlockId): Long = {
     diskManager.getFile(blockId.name).length
@@ -74,21 +73,7 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     val startTime = System.currentTimeMillis
     val file = diskManager.getFile(blockId)
     val outputStream = new FileOutputStream(file)
-    try {
-      try {
-        blockManager.dataSerializeStream(blockId, outputStream, values)
-      } finally {
-        // Close outputStream here because it should be closed before file is deleted.
-        outputStream.close()
-      }
-    } catch {
-      case e: Throwable =>
-        if (file.exists()) {
-          file.delete()
-        }
-        throw e
-    }
-
+    blockManager.dataSerializeStream(blockId, outputStream, values)
     val length = file.length
 
     val timeTaken = System.currentTimeMillis - startTime
@@ -111,13 +96,7 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
       // For small files, directly read rather than memory map
       if (length < minMemoryMapBytes) {
         val buf = ByteBuffer.allocate(length.toInt)
-        channel.position(offset)
-        while (buf.remaining() != 0) {
-          if (channel.read(buf) == -1) {
-            throw new IOException("Reached EOF before filling buffer\n" +
-              s"offset=$offset\nfile=${file.getAbsolutePath}\nbuf.remaining=${buf.remaining}")
-          }
-        }
+        channel.read(buf, offset)
         buf.flip()
         Some(buf)
       } else {

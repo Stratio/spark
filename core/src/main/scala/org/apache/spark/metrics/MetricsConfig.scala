@@ -28,12 +28,12 @@ import org.apache.spark.util.Utils
 
 private[spark] class MetricsConfig(val configFile: Option[String]) extends Logging {
 
-  private val DEFAULT_PREFIX = "*"
-  private val INSTANCE_REGEX = "^(\\*|[a-zA-Z]+)\\.(.+)".r
-  private val DEFAULT_METRICS_CONF_FILENAME = "metrics.properties"
+  val DEFAULT_PREFIX = "*"
+  val INSTANCE_REGEX = "^(\\*|[a-zA-Z]+)\\.(.+)".r
+  val METRICS_CONF = "metrics.properties"
 
-  private[metrics] val properties = new Properties()
-  private[metrics] var propertyCategories: mutable.HashMap[String, Properties] = null
+  val properties = new Properties()
+  var propertyCategories: mutable.HashMap[String, Properties] = null
 
   private def setDefaultProperties(prop: Properties) {
     prop.setProperty("*.sink.servlet.class", "org.apache.spark.metrics.sink.MetricsServlet")
@@ -47,22 +47,20 @@ private[spark] class MetricsConfig(val configFile: Option[String]) extends Loggi
     setDefaultProperties(properties)
 
     // If spark.metrics.conf is not set, try to get file in class path
-    val isOpt: Option[InputStream] = configFile.map(new FileInputStream(_)).orElse {
-      try {
-        Option(Utils.getSparkClassLoader.getResourceAsStream(DEFAULT_METRICS_CONF_FILENAME))
-      } catch {
-        case e: Exception =>
-          logError("Error loading default configuration file", e)
-          None
+    var is: InputStream = null
+    try {
+      is = configFile match {
+        case Some(f) => new FileInputStream(f)
+        case None => Utils.getSparkClassLoader.getResourceAsStream(METRICS_CONF)
       }
-    }
 
-    isOpt.foreach { is =>
-      try {
+      if (is != null) {
         properties.load(is)
-      } finally {
-        is.close()
       }
+    } catch {
+      case e: Exception => logError("Error loading configure file", e)
+    } finally {
+      if (is != null) is.close()
     }
 
     propertyCategories = subProperties(properties, INSTANCE_REGEX)

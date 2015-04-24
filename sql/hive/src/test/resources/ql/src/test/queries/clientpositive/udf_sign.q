@@ -1,22 +1,20 @@
-set hive.fetch.task.conversion=more;
+explain 
+select sign(0) FROM src LIMIT 1;
+select sign(0) FROM src LIMIT 1;
 
-explain
-select sign(0) FROM src tablesample (1 rows);
-select sign(0) FROM src tablesample (1 rows);
+select sign(-45) FROM src LIMIT 1;
 
-select sign(-45) FROM src tablesample (1 rows);
-
-select sign(46)  FROM src tablesample (1 rows);
+select sign(46)  FROM src LIMIT 1;
 
 DESCRIBE FUNCTION sign;
 DESCRIBE FUNCTION EXTENDED sign;
 explain 
-select sign(0) FROM src tablesample (1 rows);
-select sign(0) FROM src tablesample (1 rows);
+select sign(0) FROM src LIMIT 1;
+select sign(0) FROM src LIMIT 1;
 
-select sign(-45) FROM src tablesample (1 rows);
+select sign(-45) FROM src LIMIT 1;
 
-select sign(46)  FROM src tablesample (1 rows);
+select sign(46)  FROM src LIMIT 1;
 
 DESCRIBE FUNCTION sign;
 DESCRIBE FUNCTION EXTENDED sign;

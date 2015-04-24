@@ -1,5 +1,3 @@
-set hive.fetch.task.conversion=more;
-
 DESCRIBE FUNCTION hour;
 DESCRIBE FUNCTION EXTENDED hour;
 

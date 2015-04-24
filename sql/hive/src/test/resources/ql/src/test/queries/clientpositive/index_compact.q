@@ -1,4 +1,3 @@
-set hive.stats.dbclass=fs;
 DROP INDEX srcpart_index_proj on srcpart;
 
 EXPLAIN

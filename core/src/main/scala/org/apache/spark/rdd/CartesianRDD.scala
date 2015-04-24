@@ -22,7 +22,6 @@ import java.io.{IOException, ObjectOutputStream}
 import scala.reflect.ClassTag
 
 import org.apache.spark._
-import org.apache.spark.util.Utils
 
 private[spark]
 class CartesianPartition(
@@ -37,7 +36,7 @@ class CartesianPartition(
   override val index: Int = idx
 
   @throws(classOf[IOException])
-  private def writeObject(oos: ObjectOutputStream): Unit = Utils.tryOrIOException {
+  private def writeObject(oos: ObjectOutputStream) {
     // Update the reference to parent split at the time of task serialization
     s1 = rdd1.partitions(s1Index)
     s2 = rdd2.partitions(s2Index)

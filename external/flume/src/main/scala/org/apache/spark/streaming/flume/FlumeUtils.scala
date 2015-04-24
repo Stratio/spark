@@ -19,6 +19,7 @@ package org.apache.spark.streaming.flume
 
 import java.net.InetSocketAddress
 
+import org.apache.spark.annotation.Experimental
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.api.java.{JavaReceiverInputDStream, JavaStreamingContext}
@@ -120,6 +121,7 @@ object FlumeUtils {
    * @param port Port of the host at which the Spark Sink is listening
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       ssc: StreamingContext,
       hostname: String,
@@ -136,6 +138,7 @@ object FlumeUtils {
    * @param addresses List of InetSocketAddresses representing the hosts to connect to.
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       ssc: StreamingContext,
       addresses: Seq[InetSocketAddress],
@@ -156,6 +159,7 @@ object FlumeUtils {
    *                    result in this stream using more threads
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       ssc: StreamingContext,
       addresses: Seq[InetSocketAddress],
@@ -174,6 +178,7 @@ object FlumeUtils {
    * @param hostname Hostname of the host on which the Spark Sink is running
    * @param port     Port of the host at which the Spark Sink is listening
    */
+  @Experimental
   def createPollingStream(
       jssc: JavaStreamingContext,
       hostname: String,
@@ -190,6 +195,7 @@ object FlumeUtils {
    * @param port         Port of the host at which the Spark Sink is listening
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       jssc: JavaStreamingContext,
       hostname: String,
@@ -206,6 +212,7 @@ object FlumeUtils {
    * @param addresses    List of InetSocketAddresses on which the Spark Sink is running.
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       jssc: JavaStreamingContext,
       addresses: Array[InetSocketAddress],
@@ -226,6 +233,7 @@ object FlumeUtils {
    *                     result in this stream using more threads
    * @param storageLevel Storage level to use for storing the received objects
    */
+  @Experimental
   def createPollingStream(
       jssc: JavaStreamingContext,
       addresses: Array[InetSocketAddress],

@@ -27,7 +27,7 @@ class MetricsConfigSuite extends FunSuite with BeforeAndAfter {
   }
 
   test("MetricsConfig with default properties") {
-    val conf = new MetricsConfig(None)
+    val conf = new MetricsConfig(Option("dummy-file"))
     conf.initialize()
 
     assert(conf.properties.size() === 4)

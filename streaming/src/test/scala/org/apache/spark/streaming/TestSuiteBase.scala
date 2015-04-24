@@ -21,19 +21,15 @@ import java.io.{ObjectInputStream, IOException}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.SynchronizedBuffer
-import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
-import org.scalatest.time.{Span, Seconds => ScalaTestSeconds}
-import org.scalatest.concurrent.Eventually.timeout
-import org.scalatest.concurrent.PatienceConfiguration
+import com.google.common.io.Files
 
 import org.apache.spark.streaming.dstream.{DStream, InputDStream, ForEachDStream}
-import org.apache.spark.streaming.scheduler.{StreamingListenerBatchStarted, StreamingListenerBatchCompleted, StreamingListener}
+import org.apache.spark.streaming.util.ManualClock
 import org.apache.spark.{SparkConf, Logging}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.util.{ManualClock, Utils}
 
 /**
  * This is a input stream just for the testsuites. This is equivalent to a checkpointable,
@@ -77,7 +73,7 @@ class TestOutputStream[T: ClassTag](parent: DStream[T],
 
   // This is to clear the output buffer every it is read from a checkpoint
   @throws(classOf[IOException])
-  private def readObject(ois: ObjectInputStream): Unit = Utils.tryOrIOException {
+  private def readObject(ois: ObjectInputStream) {
     ois.defaultReadObject()
     output.clear()
   }
@@ -99,46 +95,12 @@ class TestOutputStreamWithPartitions[T: ClassTag](parent: DStream[T],
 
   // This is to clear the output buffer every it is read from a checkpoint
   @throws(classOf[IOException])
-  private def readObject(ois: ObjectInputStream): Unit = Utils.tryOrIOException {
+  private def readObject(ois: ObjectInputStream) {
     ois.defaultReadObject()
     output.clear()
   }
 
   def toTestOutputStream = new TestOutputStream[T](this.parent, this.output.map(_.flatten))
-}
-
-/**
- * An object that counts the number of started / completed batches. This is implemented using a
- * StreamingListener. Constructing a new instance automatically registers a StreamingListener on
- * the given StreamingContext.
- */
-class BatchCounter(ssc: StreamingContext) {
-
-  // All access to this state should be guarded by `BatchCounter.this.synchronized`
-  private var numCompletedBatches = 0
-  private var numStartedBatches = 0
-
-  private val listener = new StreamingListener {
-    override def onBatchStarted(batchStarted: StreamingListenerBatchStarted): Unit =
-      BatchCounter.this.synchronized {
-        numStartedBatches += 1
-        BatchCounter.this.notifyAll()
-      }
-    override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted): Unit =
-      BatchCounter.this.synchronized {
-        numCompletedBatches += 1
-        BatchCounter.this.notifyAll()
-      }
-  }
-  ssc.addStreamingListener(listener)
-
-  def getNumCompletedBatches: Int = this.synchronized {
-    numCompletedBatches
-  }
-
-  def getNumStartedBatches: Int = this.synchronized {
-    numStartedBatches
-  }
 }
 
 /**
@@ -158,8 +120,9 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
 
   // Directory where the checkpoint data will be saved
   lazy val checkpointDir = {
-    val dir = Utils.createTempDir()
+    val dir = Files.createTempDir()
     logDebug(s"checkpointDir: $dir")
+    dir.deleteOnExit()
     dir.toString
   }
 
@@ -180,18 +143,15 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
     .setMaster(master)
     .setAppName(framework)
 
-  // Timeout for use in ScalaTest `eventually` blocks
-  val eventuallyTimeout: PatienceConfiguration.Timeout = timeout(Span(10, ScalaTestSeconds))
-
   // Default before function for any streaming test suite. Override this
   // if you want to add your stuff to "before" (i.e., don't call before { } )
   def beforeFunction() {
     if (useManualClock) {
       logInfo("Using manual clock")
-      conf.set("spark.streaming.clock", "org.apache.spark.util.ManualClock")
+      conf.set("spark.streaming.clock", "org.apache.spark.streaming.util.ManualClock")
     } else {
       logInfo("Using real clock")
-      conf.set("spark.streaming.clock", "org.apache.spark.util.SystemClock")
+      conf.set("spark.streaming.clock", "org.apache.spark.streaming.util.SystemClock")
     }
   }
 
@@ -203,40 +163,6 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
 
   before(beforeFunction)
   after(afterFunction)
-
-  /**
-   * Run a block of code with the given StreamingContext and automatically
-   * stop the context when the block completes or when an exception is thrown.
-   */
-  def withStreamingContext[R](ssc: StreamingContext)(block: StreamingContext => R): R = {
-    try {
-      block(ssc)
-    } finally {
-      try {
-        ssc.stop(stopSparkContext = true)
-      } catch {
-        case e: Exception =>
-          logError("Error stopping StreamingContext", e)
-      }
-    }
-  }
-
-  /**
-   * Run a block of code with the given TestServer and automatically
-   * stop the server when the block completes or when an exception is thrown.
-   */
-  def withTestServer[R](testServer: TestServer)(block: TestServer => R): R = {
-    try {
-      block(testServer)
-    } finally {
-      try {
-        testServer.stop()
-      } catch {
-        case e: Exception =>
-          logError("Error stopping TestServer", e)
-      }
-    }
-  }
 
   /**
    * Set up required DStreams to test the DStream operation using the two sequences
@@ -332,23 +258,23 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
 
       // Advance manual clock
       val clock = ssc.scheduler.clock.asInstanceOf[ManualClock]
-      logInfo("Manual clock before advancing = " + clock.getTimeMillis())
+      logInfo("Manual clock before advancing = " + clock.time)
       if (actuallyWait) {
         for (i <- 1 to numBatches) {
           logInfo("Actually waiting for " + batchDuration)
-          clock.advance(batchDuration.milliseconds)
+          clock.addToTime(batchDuration.milliseconds)
           Thread.sleep(batchDuration.milliseconds)
         }
       } else {
-        clock.advance(numBatches * batchDuration.milliseconds)
+        clock.addToTime(numBatches * batchDuration.milliseconds)
       }
-      logInfo("Manual clock after advancing = " + clock.getTimeMillis())
+      logInfo("Manual clock after advancing = " + clock.time)
 
       // Wait until expected number of output items have been generated
       val startTime = System.currentTimeMillis()
       while (output.size < numExpectedOutput && System.currentTimeMillis() - startTime < maxWaitTimeMillis) {
         logInfo("output.size = " + output.size + ", numExpectedOutput = " + numExpectedOutput)
-        ssc.awaitTerminationOrTimeout(50)
+        ssc.awaitTermination(50)
       }
       val timeTaken = System.currentTimeMillis() - startTime
       logInfo("Output generated in " + timeTaken + " milliseconds")
@@ -357,8 +283,10 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
       assert(output.size === numExpectedOutput, "Unexpected number of outputs generated")
 
       Thread.sleep(100) // Give some time for the forgetting old RDDs to complete
+    } catch {
+      case e: Exception => {e.printStackTrace(); throw e}
     } finally {
-      ssc.stop(stopSparkContext = true)
+      ssc.stop()
     }
     output
   }
@@ -424,10 +352,9 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
       useSet: Boolean
     ) {
     val numBatches_ = if (numBatches > 0) numBatches else expectedOutput.size
-    withStreamingContext(setupStreams[U, V](input, operation)) { ssc =>
-      val output = runStreams[V](ssc, numBatches_, expectedOutput.size)
-      verifyOutput[V](output, expectedOutput, useSet)
-    }
+    val ssc = setupStreams[U, V](input, operation)
+    val output = runStreams[V](ssc, numBatches_, expectedOutput.size)
+    verifyOutput[V](output, expectedOutput, useSet)
   }
 
   /**
@@ -463,9 +390,8 @@ trait TestSuiteBase extends FunSuite with BeforeAndAfter with Logging {
       useSet: Boolean
     ) {
     val numBatches_ = if (numBatches > 0) numBatches else expectedOutput.size
-    withStreamingContext(setupStreams[U, V, W](input1, input2, operation)) { ssc =>
-      val output = runStreams[W](ssc, numBatches_, expectedOutput.size)
-      verifyOutput[W](output, expectedOutput, useSet)
-    }
+    val ssc = setupStreams[U, V, W](input1, input2, operation)
+    val output = runStreams[W](ssc, numBatches_, expectedOutput.size)
+    verifyOutput[W](output, expectedOutput, useSet)
   }
 }
