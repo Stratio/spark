@@ -50,9 +50,7 @@ private[spark] class SortShuffleWriter[K, V, C](
   /** Write a bunch of records to this task's output */
   override def write(records: Iterator[_ <: Product2[K, V]]): Unit = {
     if (dep.mapSideCombine) {
-      if (!dep.aggregator.isDefined) {
-        throw new IllegalStateException("Aggregator is empty for map-side combine")
-      }
+      require(dep.aggregator.isDefined, "Map-side combine without Aggregator specified!")
       sorter = new ExternalSorter[K, V, C](
         dep.aggregator, Some(dep.partitioner), dep.keyOrdering, dep.serializer)
       sorter.insertAll(records)
@@ -65,13 +63,15 @@ private[spark] class SortShuffleWriter[K, V, C](
       sorter.insertAll(records)
     }
 
+    // Don't bother including the time to open the merged output file in the shuffle write time,
+    // because it just opens a single file, so is typically too fast to measure accurately
+    // (see SPARK-3570).
     val outputFile = shuffleBlockManager.getDataFile(dep.shuffleId, mapId)
     val blockId = shuffleBlockManager.consolidateId(dep.shuffleId, mapId)
     val partitionLengths = sorter.writePartitionedFile(blockId, context, outputFile)
     shuffleBlockManager.writeIndexFile(dep.shuffleId, mapId, partitionLengths)
 
-    mapStatus = new MapStatus(blockManager.blockManagerId,
-      partitionLengths.map(MapOutputTracker.compressSize))
+    mapStatus = MapStatus(blockManager.shuffleServerId, partitionLengths)
   }
 
   /** Close this writer, passing along whether the map completed */

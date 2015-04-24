@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-# Gather all all spark-submit options into SUBMISSION_OPTS
+# Gather all spark-submit options into SUBMISSION_OPTS
 function gatherSparkSubmitOpts() {
 
   if [ -z "$SUBMIT_USAGE_FUNCTION" ]; then
@@ -26,16 +26,17 @@ function gatherSparkSubmitOpts() {
     exit 1
   fi
 
-  # NOTE: If you add or remove spark-sumbmit options,
+  # NOTE: If you add or remove spark-submit options,
   # modify NOT ONLY this script but also SparkSubmitArgument.scala
   SUBMISSION_OPTS=()
   APPLICATION_OPTS=()
   while (($#)); do
     case "$1" in
-      --master | --deploy-mode | --class | --name | --jars | --py-files | --files | \
-      --conf | --properties-file | --driver-memory | --driver-java-options | \
+      --master | --deploy-mode | --class | --name | --jars | --packages | --py-files | --files | \
+      --conf | --repositories | --properties-file | --driver-memory | --driver-java-options | \
       --driver-library-path | --driver-class-path | --executor-memory | --driver-cores | \
-      --total-executor-cores | --executor-cores | --queue | --num-executors | --archives)
+      --total-executor-cores | --executor-cores | --queue | --num-executors | --archives | \
+      --proxy-user)
         if [[ $# -lt 2 ]]; then
           "$SUBMIT_USAGE_FUNCTION"
           exit 1;
