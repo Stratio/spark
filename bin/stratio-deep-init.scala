@@ -25,9 +25,10 @@ import com.stratio.deep.aerospike.extractor._
 //Spark
 import org.apache.spark.rdd._
 import org.apache.spark.SparkContext._
-import org.apache.spark.sql.api.java.JavaSQLContext;
-import org.apache.spark.sql.api.java.JavaSchemaRDD;
-import org.apache.spark.sql.api.java.Row;
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.types.StructType
 
 //Scala
 import scala.collection.JavaConversions._
